@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/thrasher-corp/gocryptotrader/common"
 	"github.com/thrasher-corp/gocryptotrader/currency"
 	"github.com/thrasher-corp/gocryptotrader/database"
@@ -95,16 +96,16 @@ func TestCreateKline(t *testing.T) {
 	}
 
 	tradeTotal := 24000
-	var trades []order.TradeHistory
+	trades := make([]order.TradeHistory, tradeTotal)
 	execution := time.Now()
-	for i := 0; i < tradeTotal; i++ {
+	for x := range tradeTotal {
 		price, rndTime := 1000+float64(rand.Intn(1000)), rand.Intn(10) //nolint:gosec // no need to import crypo/rand for testing
 		execution = execution.Add(time.Duration(rndTime) * time.Second)
-		trades = append(trades, order.TradeHistory{
+		trades[x] = order.TradeHistory{
 			Timestamp: execution,
 			Amount:    1, // Keep as one for counting
 			Price:     price,
-		})
+		}
 	}
 
 	_, err = CreateKline(trades, 0, pair, asset.Spot, "Binance")
@@ -142,9 +143,9 @@ func TestKlineDuration(t *testing.T) {
 
 func TestKlineShort(t *testing.T) {
 	t.Parallel()
-	if OneDay.Short() != "24h" {
-		t.Fatalf("unexpected result: %v", OneDay.Short())
-	}
+	assert.Equal(t, "24h", OneDay.Short(), "One day should show as 24h")
+	assert.Equal(t, "1h", OneHour.Short(), "One hour should truncate 0m0s suffix")
+	assert.Equal(t, "raw", Raw.Short(), "Raw should return raw")
 }
 
 func TestDurationToWord(t *testing.T) {
@@ -153,6 +154,22 @@ func TestDurationToWord(t *testing.T) {
 		name     string
 		interval Interval
 	}{
+		{
+			"raw",
+			Raw,
+		},
+		{
+			"hundredmillisec",
+			HundredMilliseconds,
+		},
+		{
+			"thousandmillisec",
+			ThousandMilliseconds,
+		},
+		{
+			"tensec",
+			TenSecond,
+		},
 		{
 			"FifteenSecond",
 			FifteenSecond,
@@ -232,6 +249,14 @@ func TestDurationToWord(t *testing.T) {
 		{
 			"OneMonth",
 			OneMonth,
+		},
+		{
+			"ThreeMonth",
+			ThreeMonth,
+		},
+		{
+			"SixMonth",
+			SixMonth,
 		},
 		{
 			"OneYear",
@@ -458,7 +483,7 @@ func TestItem_SortCandlesByTimestamp(t *testing.T) {
 		Interval: OneDay,
 	}
 
-	for x := 0; x < 100; x++ {
+	for x := range 100 {
 		y := rand.Float64() //nolint:gosec // used for generating test data, no need to import crypo/rand
 		tempKline.Candles = append(tempKline.Candles,
 			Candle{
@@ -684,7 +709,7 @@ func genOHCLVData() (out candle.Item, outItem Item, err error) {
 	out.Asset = "spot"
 
 	start := time.Date(2019, 1, 1, 0, 0, 0, 0, time.UTC)
-	for x := 0; x < 365; x++ {
+	for x := range 365 {
 		out.Candles = append(out.Candles, candle.Candle{
 			Timestamp: start.Add(time.Hour * 24 * time.Duration(x)),
 			Open:      1000,
@@ -700,7 +725,7 @@ func genOHCLVData() (out candle.Item, outItem Item, err error) {
 	outItem.Pair = currency.NewPair(currency.BTC, currency.USDT)
 	outItem.Exchange = testExchanges[0].Name
 
-	for x := 0; x < 365; x++ {
+	for x := range 365 {
 		outItem.Candles = append(outItem.Candles, Candle{
 			Time:   start.Add(time.Hour * 24 * time.Duration(x)),
 			Open:   1000,
@@ -877,9 +902,8 @@ func BenchmarkJustifyIntervalTimeStoringUnixValues1(b *testing.B) {
 	tt2 := time.Now().Add(-time.Hour)
 	tt3 := time.Now().Add(time.Hour)
 	for i := 0; i < b.N; i++ {
-		if tt1.Unix() == tt2.Unix() || //nolint:staticcheck // it is a benchmark to demonstrate inefficiency in calling
-			(tt1.Unix() > tt2.Unix() && tt1.Unix() < tt3.Unix()) {
-
+		if tt1.Unix() == tt2.Unix() || (tt1.Unix() > tt2.Unix() && tt1.Unix() < tt3.Unix()) {
+			continue
 		}
 	}
 }
@@ -893,8 +917,8 @@ func BenchmarkJustifyIntervalTimeStoringUnixValues2(b *testing.B) {
 	tt2 := time.Now().Add(-time.Hour).Unix()
 	tt3 := time.Now().Add(time.Hour).Unix()
 	for i := 0; i < b.N; i++ {
-		if tt1 >= tt2 && tt1 <= tt3 { //nolint:staticcheck // it is a benchmark to demonstrate inefficiency in calling
-
+		if tt1 >= tt2 && tt1 <= tt3 {
+			continue
 		}
 	}
 }
@@ -1033,6 +1057,18 @@ func TestConvertToNewInterval(t *testing.T) {
 			Close:  5555,
 			Volume: 2520,
 		},
+		{
+			Time: tn.AddDate(0, 0, 6),
+			// Empty end padding
+		},
+		{
+			Time: tn.AddDate(0, 0, 7),
+			// Empty end padding
+		},
+		{
+			Time: tn.AddDate(0, 0, 8),
+			// Empty end padding
+		},
 	}
 
 	_, err = old.ConvertToNewInterval(newInterval)
@@ -1040,18 +1076,18 @@ func TestConvertToNewInterval(t *testing.T) {
 		t.Errorf("received '%v' expected '%v'", err, errCandleDataNotPadded)
 	}
 
-	err = old.addPadding(tn, tn.AddDate(0, 0, 6), false)
+	err = old.addPadding(tn, tn.AddDate(0, 0, 9), false)
 	if !errors.Is(err, nil) {
-		t.Errorf("received '%v' expected '%v'", err, nil)
+		t.Fatalf("received '%v' expected '%v'", err, nil)
 	}
 
 	newCandle, err = old.ConvertToNewInterval(newInterval)
 	if !errors.Is(err, nil) {
-		t.Errorf("received '%v' expected '%v'", err, nil)
+		t.Fatalf("received '%v' expected '%v'", err, nil)
 	}
 
-	if len(newCandle.Candles) != 2 {
-		t.Errorf("received '%v' expected '%v'", len(newCandle.Candles), 2)
+	if len(newCandle.Candles) != 3 {
+		t.Errorf("received '%v' expected '%v'", len(newCandle.Candles), 3)
 	}
 }
 
@@ -1104,6 +1140,37 @@ func TestAddPadding(t *testing.T) {
 	err = k.addPadding(tn.AddDate(0, 0, 5), tn, false)
 	if !errors.Is(err, errCannotEstablishTimeWindow) {
 		t.Fatalf("received '%v' expected '%v'", err, errCannotEstablishTimeWindow)
+	}
+
+	k.Candles = []Candle{
+		{
+			Time:   tn.Add(time.Hour * 8),
+			Open:   1337,
+			High:   1339,
+			Low:    1336,
+			Close:  1338,
+			Volume: 1337,
+		},
+		{
+			Time:   tn.AddDate(0, 0, 1).Add(time.Hour * 8),
+			Open:   1338,
+			High:   2000,
+			Low:    1332,
+			Close:  1696,
+			Volume: 6420,
+		},
+		{
+			Time:   tn.AddDate(0, 0, 2).Add(time.Hour * 8),
+			Open:   1696,
+			High:   1998,
+			Low:    1337,
+			Close:  6969,
+			Volume: 2520,
+		}}
+
+	err = k.addPadding(tn, tn.AddDate(0, 0, 3), false)
+	if !errors.Is(err, errCandleOpenTimeIsNotUTCAligned) {
+		t.Fatalf("received '%v' expected '%v'", err, errCandleOpenTimeIsNotUTCAligned)
 	}
 
 	k.Candles = []Candle{
@@ -1207,7 +1274,7 @@ func TestDeployExchangeIntervals(t *testing.T) {
 		t.Errorf("received '%v' expected '%v'", exchangeIntervals.ExchangeSupported(OneWeek), false)
 	}
 
-	exchangeIntervals = DeployExchangeIntervals(OneWeek)
+	exchangeIntervals = DeployExchangeIntervals(IntervalCapacity{Interval: OneWeek})
 	if !exchangeIntervals.ExchangeSupported(OneWeek) {
 		t.Errorf("received '%v' expected '%v'", exchangeIntervals.ExchangeSupported(OneWeek), true)
 	}
@@ -1231,7 +1298,7 @@ func TestDeployExchangeIntervals(t *testing.T) {
 		t.Errorf("received '%v' expected '%v'", request, OneWeek)
 	}
 
-	exchangeIntervals = DeployExchangeIntervals(OneWeek, OneDay)
+	exchangeIntervals = DeployExchangeIntervals(IntervalCapacity{Interval: OneWeek}, IntervalCapacity{Interval: OneDay})
 
 	request, err = exchangeIntervals.Construct(OneMonth)
 	if !errors.Is(err, nil) {
@@ -1285,4 +1352,66 @@ func TestSetHasDataFromCandles(t *testing.T) {
 	if !i.HasDataAtDate(k.Candles[len(k.Candles)-1].Time) {
 		t.Errorf("received '%v' expected '%v'", true, false)
 	}
+}
+
+func TestGetIntervalResultLimit(t *testing.T) {
+	t.Parallel()
+
+	var e *ExchangeCapabilitiesEnabled
+	_, err := e.GetIntervalResultLimit(OneMin)
+	if !errors.Is(err, errExchangeCapabilitiesEnabledIsNil) {
+		t.Errorf("received '%v' expected '%v'", err, errExchangeCapabilitiesEnabledIsNil)
+	}
+
+	e = &ExchangeCapabilitiesEnabled{}
+	e.Intervals = ExchangeIntervals{}
+	_, err = e.GetIntervalResultLimit(OneDay)
+	if !errors.Is(err, errIntervalNotSupported) {
+		t.Errorf("received '%v' expected '%v'", err, errIntervalNotSupported)
+	}
+
+	e.Intervals = ExchangeIntervals{
+		supported: map[Interval]int64{
+			OneDay: 100000,
+			OneMin: 0,
+		},
+	}
+
+	_, err = e.GetIntervalResultLimit(OneMin)
+	if !errors.Is(err, errCannotFetchIntervalLimit) {
+		t.Errorf("received '%v' expected '%v'", err, errCannotFetchIntervalLimit)
+	}
+
+	limit, err := e.GetIntervalResultLimit(OneDay)
+	if !errors.Is(err, nil) {
+		t.Errorf("received '%v' expected '%v'", err, nil)
+	}
+
+	if limit != 100000 {
+		t.Errorf("received '%v' expected '%v'", limit, 100000)
+	}
+
+	e.GlobalResultLimit = 1337
+	limit, err = e.GetIntervalResultLimit(OneMin)
+	if !errors.Is(err, nil) {
+		t.Errorf("received '%v' expected '%v'", err, nil)
+	}
+
+	if limit != 1337 {
+		t.Errorf("received '%v' expected '%v'", limit, 1337)
+	}
+}
+
+func TestUnmarshalJSON(t *testing.T) {
+	t.Parallel()
+	var i Interval
+	for _, tt := range []struct {
+		in  string
+		exp Interval
+	}{{`"3m"`, ThreeMin}, {`"15s"`, FifteenSecond}, {`720000000000`, OneMin * 12}, {`"-1ns"`, Raw}, {`"raw"`, Raw}} {
+		err := i.UnmarshalJSON([]byte(tt.in))
+		assert.NoErrorf(t, err, "UnmarshalJSON should not error on %q", tt.in)
+	}
+	err := i.UnmarshalJSON([]byte(`"6hedgehogs"`))
+	assert.ErrorContains(t, err, "unknown unit", "UnmarshalJSON should error")
 }

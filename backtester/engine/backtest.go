@@ -21,6 +21,7 @@ import (
 	"github.com/thrasher-corp/gocryptotrader/currency"
 	gctexchange "github.com/thrasher-corp/gocryptotrader/exchanges"
 	"github.com/thrasher-corp/gocryptotrader/exchanges/asset"
+	"github.com/thrasher-corp/gocryptotrader/exchanges/futures"
 	gctorder "github.com/thrasher-corp/gocryptotrader/exchanges/order"
 	"github.com/thrasher-corp/gocryptotrader/log"
 )
@@ -95,7 +96,7 @@ func (bt *BackTest) RunLive() error {
 	go func() {
 		err = bt.liveCheck()
 		if err != nil {
-			log.Error(common.LiveStrategy, err)
+			log.Errorln(common.LiveStrategy, err)
 		}
 		bt.wg.Done()
 	}()
@@ -153,7 +154,7 @@ func (bt *BackTest) ExecuteStrategy(waitForOfflineCompletion bool) error {
 	case waitForOfflineCompletion && !liveTesting:
 		err = bt.Run()
 		if err != nil {
-			log.Error(common.Backtester, err)
+			log.Errorln(common.Backtester, err)
 		}
 		return bt.Stop()
 	case !waitForOfflineCompletion && liveTesting:
@@ -162,11 +163,11 @@ func (bt *BackTest) ExecuteStrategy(waitForOfflineCompletion bool) error {
 		go func() {
 			err = bt.Run()
 			if err != nil {
-				log.Error(common.Backtester, err)
+				log.Errorln(common.Backtester, err)
 			}
 			err = bt.Stop()
 			if err != nil {
-				log.Error(common.Backtester, err)
+				log.Errorln(common.Backtester, err)
 			}
 		}()
 	}
@@ -188,7 +189,7 @@ func (bt *BackTest) Run() error {
 			}
 			if doubleNil {
 				if bt.verbose {
-					log.Info(common.Backtester, "No new data on second check")
+					log.Infoln(common.Backtester, "No new data on second check")
 				}
 				return nil
 			}
@@ -237,7 +238,7 @@ func (bt *BackTest) Run() error {
 			doubleNil = false
 			err := bt.handleEvent(ev)
 			if err != nil {
-				log.Error(common.Backtester, err)
+				log.Errorln(common.Backtester, err)
 			}
 			if !bt.hasProcessedAnEvent {
 				bt.hasProcessedAnEvent = true
@@ -283,7 +284,7 @@ func (bt *BackTest) handleEvent(ev common.Event) error {
 			if err != nil {
 				return err
 			}
-			log.Info(common.LiveStrategy, result)
+			log.Infoln(common.LiveStrategy, result)
 		}
 	default:
 		err = fmt.Errorf("handleEvent %w %T received, could not process",
@@ -356,10 +357,10 @@ func (bt *BackTest) processSimultaneousDataEvents() error {
 					log.Warnf(common.LiveStrategy, "%v %v", latestData.GetOffset(), err)
 				}
 				continue
-			case errors.Is(err, gctorder.ErrPositionLiquidated):
+			case errors.Is(err, futures.ErrPositionLiquidated):
 				return nil
 			default:
-				log.Error(common.Backtester, err)
+				log.Errorln(common.Backtester, err)
 			}
 		}
 		dataEvents = append(dataEvents, dataHolders[i])
@@ -420,11 +421,11 @@ func (bt *BackTest) updateStatsForDataEvent(ev data.Event, funds funding.IFundRe
 
 		err = bt.Portfolio.UpdatePNL(ev, ev.GetClosePrice())
 		if err != nil {
-			if errors.Is(err, gctorder.ErrPositionNotFound) {
+			if errors.Is(err, futures.ErrPositionNotFound) {
 				// if there is no position yet, there's nothing to update
 				return nil
 			}
-			if !errors.Is(err, gctorder.ErrPositionLiquidated) {
+			if !errors.Is(err, futures.ErrPositionLiquidated) {
 				return fmt.Errorf("UpdatePNL %v", err)
 			}
 		}
@@ -440,7 +441,7 @@ func (bt *BackTest) updateStatsForDataEvent(ev data.Event, funds funding.IFundRe
 		if bt.LiveDataHandler == nil || (bt.LiveDataHandler != nil && !bt.LiveDataHandler.IsRealOrders()) {
 			err = bt.Portfolio.CheckLiquidationStatus(ev, cr, pnl)
 			if err != nil {
-				if errors.Is(err, gctorder.ErrPositionLiquidated) {
+				if errors.Is(err, futures.ErrPositionLiquidated) {
 					liquidErr := bt.triggerLiquidationsForExchange(ev, pnl)
 					if liquidErr != nil {
 						return liquidErr
@@ -524,7 +525,7 @@ func (bt *BackTest) processFillEvent(ev fill.Event, funds funding.IFundReleaser)
 	}
 	holding, err := bt.Portfolio.ViewHoldingAtTimePeriod(ev)
 	if err != nil {
-		log.Error(common.Backtester, err)
+		log.Errorln(common.Backtester, err)
 	}
 	err = bt.Statistic.AddHoldingsForTime(holding)
 	if err != nil {
@@ -620,6 +621,9 @@ func (bt *BackTest) Stop() error {
 		if err != nil {
 			log.Errorf(common.Backtester, "Could not close all positions on stop: %s", err)
 		}
+	}
+	if !bt.hasProcessedAnEvent {
+		return nil
 	}
 	err := bt.Statistic.CalculateAllResults()
 	if err != nil {

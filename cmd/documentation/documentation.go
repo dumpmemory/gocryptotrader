@@ -17,6 +17,8 @@ import (
 	"github.com/thrasher-corp/gocryptotrader/common"
 	"github.com/thrasher-corp/gocryptotrader/common/file"
 	"github.com/thrasher-corp/gocryptotrader/core"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 const (
@@ -172,13 +174,33 @@ func main() {
 		// Github API missing contributors
 		contributors = append(contributors, []Contributor{
 			{
+				Login:         "andreygrehov",
+				URL:           "https://github.com/andreygrehov",
+				Contributions: 2,
+			},
+			{
+				Login:         "azhang",
+				URL:           "https://github.com/azhang",
+				Contributions: 2,
+			},
+			{
+				Login:         "bretep",
+				URL:           "https://github.com/bretep",
+				Contributions: 2,
+			},
+			{
+				Login:         "Christian-Achilli",
+				URL:           "https://github.com/Christian-Achilli",
+				Contributions: 2,
+			},
+			{
 				Login:         "cornelk",
 				URL:           "https://github.com/cornelk",
 				Contributions: 2,
 			},
 			{
-				Login:         "herenow",
-				URL:           "https://github.com/herenow",
+				Login:         "gam-phon",
+				URL:           "https://github.com/gam-phon",
 				Contributions: 2,
 			},
 			{
@@ -192,18 +214,8 @@ func main() {
 				Contributions: 2,
 			},
 			{
-				Login:         "mshogin",
-				URL:           "https://github.com/mshogin",
-				Contributions: 2,
-			},
-			{
-				Login:         "soxipy",
-				URL:           "https://github.com/soxipy",
-				Contributions: 2,
-			},
-			{
-				Login:         "tk42",
-				URL:           "https://github.com/tk42",
+				Login:         "MarkDzulko",
+				URL:           "https://github.com/MarkDzulko",
 				Contributions: 2,
 			},
 			{
@@ -492,7 +504,7 @@ func GetPackageName(name string, capital bool) string {
 		i = len(newStrings) - 1
 	}
 	if capital {
-		return strings.Replace(strings.Title(newStrings[i]), "_", " ", -1) //nolint:staticcheck // Ignore Title usage warning
+		return strings.Replace(cases.Title(language.English).String(newStrings[i]), "_", " ", -1)
 	}
 	return newStrings[i]
 }
