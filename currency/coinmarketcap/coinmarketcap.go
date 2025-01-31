@@ -39,7 +39,7 @@ func (c *Coinmarketcap) SetDefaults() {
 	var err error
 	c.Requester, err = request.New(c.Name,
 		common.NewHTTPClientWithTimeout(defaultTimeOut),
-		request.WithLimiter(request.NewBasicRateLimit(RateInterval, BasicRequestRate)),
+		request.WithLimiter(request.NewBasicRateLimit(RateInterval, BasicRequestRate, 1)),
 	)
 	if err != nil {
 		log.Errorln(log.Global, err)
@@ -699,7 +699,7 @@ func (c *Coinmarketcap) SendHTTPRequest(method, endpoint string, v url.Values, r
 		Verbose: c.Verbose}
 	return c.Requester.SendPayload(context.TODO(), request.Unset, func() (*request.Item, error) {
 		return item, nil
-	})
+	}, request.AuthenticatedRequest)
 }
 
 // CheckAccountPlan checks your current account plan to the minimal account

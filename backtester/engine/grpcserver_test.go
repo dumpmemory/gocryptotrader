@@ -88,8 +88,8 @@ func TestExecuteStrategyFromFile(t *testing.T) {
 
 	_, err = s.ExecuteStrategyFromFile(context.Background(), &btrpc.ExecuteStrategyFromFileRequest{
 		StrategyFilePath:  dcaConfigPath,
-		StartTimeOverride: timestamppb.New(time.Now().Add(-time.Hour * 2)),
-		EndTimeOverride:   timestamppb.New(time.Now()),
+		StartTimeOverride: timestamppb.New(time.Now().Add(-time.Hour * 6).Truncate(time.Hour)),
+		EndTimeOverride:   timestamppb.New(time.Now().Add(-time.Hour * 2).Truncate(time.Hour)),
 		IntervalOverride:  uint64(time.Hour.Nanoseconds()),
 	})
 	if !errors.Is(err, nil) {
@@ -162,11 +162,13 @@ func TestExecuteStrategyFromConfig(t *testing.T) {
 		}
 		var fd *btrpc.FuturesDetails
 		if defaultConfig.CurrencySettings[i].FuturesDetails != nil {
-			fd.Leverage = &btrpc.Leverage{
-				CanUseLeverage:                 defaultConfig.CurrencySettings[i].FuturesDetails.Leverage.CanUseLeverage,
-				MaximumOrdersWithLeverageRatio: defaultConfig.CurrencySettings[i].FuturesDetails.Leverage.MaximumOrdersWithLeverageRatio.String(),
-				MaximumLeverageRate:            defaultConfig.CurrencySettings[i].FuturesDetails.Leverage.MaximumOrderLeverageRate.String(),
-				MaximumCollateralLeverageRate:  defaultConfig.CurrencySettings[i].FuturesDetails.Leverage.MaximumCollateralLeverageRate.String(),
+			fd = &btrpc.FuturesDetails{
+				Leverage: &btrpc.Leverage{
+					CanUseLeverage:                 defaultConfig.CurrencySettings[i].FuturesDetails.Leverage.CanUseLeverage,
+					MaximumOrdersWithLeverageRatio: defaultConfig.CurrencySettings[i].FuturesDetails.Leverage.MaximumOrdersWithLeverageRatio.String(),
+					MaximumLeverageRate:            defaultConfig.CurrencySettings[i].FuturesDetails.Leverage.MaximumOrderLeverageRate.String(),
+					MaximumCollateralLeverageRate:  defaultConfig.CurrencySettings[i].FuturesDetails.Leverage.MaximumCollateralLeverageRate.String(),
+				},
 			}
 		}
 		var makerFee, takerFee string
@@ -317,7 +319,7 @@ func TestExecuteStrategyFromConfig(t *testing.T) {
 		Config: cfg,
 	})
 	if !errors.Is(err, nil) {
-		t.Errorf("received '%v' expecting '%v'", err, nil)
+		t.Fatalf("received '%v' expecting '%v'", err, nil)
 	}
 
 	_, err = s.ExecuteStrategyFromConfig(context.Background(), &btrpc.ExecuteStrategyFromConfigRequest{

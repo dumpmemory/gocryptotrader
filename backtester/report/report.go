@@ -5,14 +5,16 @@ import (
 	"html/template"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/shopspring/decimal"
 	"github.com/thrasher-corp/gocryptotrader/backtester/common"
+	"github.com/thrasher-corp/gocryptotrader/common/key"
 	"github.com/thrasher-corp/gocryptotrader/exchanges/kline"
 	"github.com/thrasher-corp/gocryptotrader/exchanges/order"
 	"github.com/thrasher-corp/gocryptotrader/log"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 // GenerateReport sends final data from statistics to a template
@@ -21,7 +23,7 @@ func (d *Data) GenerateReport() error {
 	if d.TemplatePath == "" || d.OutputPath == "" {
 		return nil
 	}
-	log.Info(common.Report, "Generating report")
+	log.Infoln(common.Report, "Generating report")
 	err := d.enhanceCandles()
 	if err != nil {
 		return err
@@ -95,7 +97,7 @@ func (d *Data) GenerateReport() error {
 	defer func() {
 		err = f.Close()
 		if err != nil {
-			log.Error(common.Report, err)
+			log.Errorln(common.Report, err)
 		}
 	}()
 
@@ -144,11 +146,15 @@ func (d *Data) enhanceCandles() error {
 			Asset:     lookup.Asset,
 			Pair:      lookup.Pair,
 			Interval:  lookup.Interval,
-			Watermark: fmt.Sprintf("%s - %s - %s", strings.Title(lookup.Exchange), lookup.Asset.String(), lookup.Pair.Upper()), //nolint:staticcheck // Ignore Title usage warning
+			Watermark: fmt.Sprintf("%s - %s - %s", cases.Title(language.English).String(lookup.Exchange), lookup.Asset.String(), lookup.Pair.Upper()),
 		}
 
-		statsForCandles :=
-			d.Statistics.ExchangeAssetPairStatistics[lookup.Exchange][lookup.Asset][lookup.Pair.Base.Item][lookup.Pair.Quote.Item]
+		statsForCandles := d.Statistics.ExchangeAssetPairStatistics[key.ExchangePairAsset{
+			Exchange: lookup.Exchange,
+			Base:     lookup.Pair.Base.Item,
+			Quote:    lookup.Pair.Quote.Item,
+			Asset:    lookup.Asset,
+		}]
 		if statsForCandles == nil {
 			continue
 		}

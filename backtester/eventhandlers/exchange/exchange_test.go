@@ -16,6 +16,8 @@ import (
 	"github.com/thrasher-corp/gocryptotrader/backtester/eventtypes/order"
 	"github.com/thrasher-corp/gocryptotrader/backtester/funding"
 	gctcommon "github.com/thrasher-corp/gocryptotrader/common"
+	"github.com/thrasher-corp/gocryptotrader/common/convert"
+	gctconfig "github.com/thrasher-corp/gocryptotrader/config"
 	"github.com/thrasher-corp/gocryptotrader/currency"
 	"github.com/thrasher-corp/gocryptotrader/engine"
 	exchange "github.com/thrasher-corp/gocryptotrader/exchanges"
@@ -151,7 +153,7 @@ func TestSetCurrency(t *testing.T) {
 
 func TestEnsureOrderFitsWithinHLV(t *testing.T) {
 	t.Parallel()
-	adjustedPrice, adjustedAmount := ensureOrderFitsWithinHLV(decimal.NewFromInt(123), decimal.NewFromInt(1), decimal.NewFromInt(100), decimal.NewFromInt(99), decimal.NewFromInt(100))
+	adjustedPrice, adjustedAmount := ensureOrderFitsWithinHLV(decimal.NewFromInt(123), decimal.NewFromInt(1), decimal.NewFromInt(100), decimal.NewFromInt(99), decimal.NewFromInt(10))
 	if !adjustedAmount.Equal(decimal.NewFromInt(1)) {
 		t.Error("expected 1")
 	}
@@ -159,7 +161,7 @@ func TestEnsureOrderFitsWithinHLV(t *testing.T) {
 		t.Error("expected 100")
 	}
 
-	adjustedPrice, adjustedAmount = ensureOrderFitsWithinHLV(decimal.NewFromInt(123), decimal.NewFromInt(1), decimal.NewFromInt(100), decimal.NewFromInt(99), decimal.NewFromInt(80))
+	adjustedPrice, adjustedAmount = ensureOrderFitsWithinHLV(decimal.NewFromInt(123), decimal.NewFromInt(1), decimal.NewFromInt(100), decimal.NewFromInt(99), decimal.NewFromFloat(0.8))
 	if !adjustedAmount.Equal(decimal.NewFromFloat(0.799999992)) {
 		t.Errorf("received: %v, expected: %v", adjustedAmount, decimal.NewFromFloat(0.799999992))
 	}
@@ -184,7 +186,7 @@ func TestPlaceOrder(t *testing.T) {
 	t.Parallel()
 	bot := &engine.Engine{}
 	var err error
-	em := engine.SetupExchangeManager()
+	em := engine.NewExchangeManager()
 	exch, err := em.NewExchangeByName(testExchange)
 	if err != nil {
 		t.Fatal(err)
@@ -192,9 +194,11 @@ func TestPlaceOrder(t *testing.T) {
 	exch.SetDefaults()
 	exchB := exch.GetBase()
 	exchB.States = currencystate.NewCurrencyStates()
-	em.Add(exch)
-	bot.ExchangeManager = em
-	bot.OrderManager, err = engine.SetupOrderManager(em, &engine.CommunicationManager{}, &bot.ServicesWG, false, false, 0)
+	err = em.Add(exch)
+	if !errors.Is(err, nil) {
+		t.Fatalf("received: '%v' but expected: '%v'", err, nil)
+	}
+	bot.OrderManager, err = engine.SetupOrderManager(em, &engine.CommunicationManager{}, &bot.ServicesWG, &gctconfig.OrderManager{})
 	if !errors.Is(err, nil) {
 		t.Errorf("received '%v' expected '%v'", err, nil)
 	}
@@ -238,7 +242,7 @@ func TestExecuteOrder(t *testing.T) {
 	t.Parallel()
 	bot := &engine.Engine{}
 	var err error
-	em := engine.SetupExchangeManager()
+	em := engine.NewExchangeManager()
 	const testExchange = "binanceus"
 	exch, err := em.NewExchangeByName(testExchange)
 	if err != nil {
@@ -247,9 +251,11 @@ func TestExecuteOrder(t *testing.T) {
 	exch.SetDefaults()
 	exchB := exch.GetBase()
 	exchB.States = currencystate.NewCurrencyStates()
-	em.Add(exch)
-	bot.ExchangeManager = em
-	bot.OrderManager, err = engine.SetupOrderManager(em, &engine.CommunicationManager{}, &bot.ServicesWG, false, false, 0)
+	err = em.Add(exch)
+	if !errors.Is(err, nil) {
+		t.Fatalf("received: '%v' but expected: '%v'", err, nil)
+	}
+	bot.OrderManager, err = engine.SetupOrderManager(em, &engine.CommunicationManager{}, &bot.ServicesWG, &gctconfig.OrderManager{})
 	if !errors.Is(err, nil) {
 		t.Errorf("received: %v, expected: %v", err, nil)
 	}
@@ -359,7 +365,7 @@ func TestExecuteOrderBuySellSizeLimit(t *testing.T) {
 	t.Parallel()
 	bot := &engine.Engine{}
 	var err error
-	em := engine.SetupExchangeManager()
+	em := engine.NewExchangeManager()
 	const testExchange = "BTC Markets"
 	exch, err := em.NewExchangeByName(testExchange)
 	if err != nil {
@@ -367,10 +373,24 @@ func TestExecuteOrderBuySellSizeLimit(t *testing.T) {
 	}
 	exch.SetDefaults()
 	exchB := exch.GetBase()
+	exchB.CurrencyPairs = currency.PairsManager{
+		UseGlobalFormat: true,
+		RequestFormat: &currency.PairFormat{
+			Uppercase: true,
+			Delimiter: currency.DashDelimiter,
+		},
+		Pairs: map[asset.Item]*currency.PairStore{
+			asset.Spot: {
+				AssetEnabled: convert.BoolPtr(true),
+			},
+		},
+	}
 	exchB.States = currencystate.NewCurrencyStates()
-	em.Add(exch)
-	bot.ExchangeManager = em
-	bot.OrderManager, err = engine.SetupOrderManager(em, &engine.CommunicationManager{}, &bot.ServicesWG, false, false, 0)
+	err = em.Add(exch)
+	if !errors.Is(err, nil) {
+		t.Fatalf("received: '%v' but expected: '%v'", err, nil)
+	}
+	bot.OrderManager, err = engine.SetupOrderManager(em, &engine.CommunicationManager{}, &bot.ServicesWG, &gctconfig.OrderManager{})
 	if !errors.Is(err, nil) {
 		t.Errorf("received: %v, expected: %v", err, nil)
 	}

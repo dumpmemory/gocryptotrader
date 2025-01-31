@@ -14,14 +14,14 @@ import (
 	gctkline "github.com/thrasher-corp/gocryptotrader/exchanges/kline"
 )
 
-const testExchange = "binanceus"
+const testExchange = "okx"
 
 func TestLoadCandles(t *testing.T) {
 	t.Parallel()
 	interval := gctkline.OneHour
 	cp := currency.NewPair(currency.BTC, currency.USDT)
 	a := asset.Spot
-	em := engine.SetupExchangeManager()
+	em := engine.NewExchangeManager()
 	exch, err := em.NewExchangeByName(testExchange)
 	if err != nil {
 		t.Fatal(err)
@@ -38,7 +38,7 @@ func TestLoadCandles(t *testing.T) {
 		ConfigFormat:  pFormat,
 	}
 	var data *gctkline.Item
-	data, err = LoadData(context.Background(), time.Now(), exch, common.DataCandle, interval.Duration(), cp, currency.EMPTYPAIR, a, true)
+	data, err = LoadData(context.Background(), time.Now().Add(-interval.Duration()*10), exch, common.DataCandle, interval.Duration(), cp, currency.EMPTYPAIR, a, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestLoadTrades(t *testing.T) {
 	interval := gctkline.OneMin
 	cp := currency.NewPair(currency.BTC, currency.USDT)
 	a := asset.Spot
-	em := engine.SetupExchangeManager()
+	em := engine.NewExchangeManager()
 	exch, err := em.NewExchangeByName(testExchange)
 	if err != nil {
 		t.Fatal(err)
@@ -73,7 +73,7 @@ func TestLoadTrades(t *testing.T) {
 		ConfigFormat:  pFormat,
 	}
 	var data *gctkline.Item
-	data, err = LoadData(context.Background(), time.Now(), exch, common.DataTrade, interval.Duration(), cp, currency.EMPTYPAIR, a, true)
+	data, err = LoadData(context.Background(), time.Now().Add(-interval.Duration()*60), exch, common.DataTrade, interval.Duration(), cp, currency.EMPTYPAIR, a, true)
 	if err != nil {
 		t.Fatal(err)
 	}

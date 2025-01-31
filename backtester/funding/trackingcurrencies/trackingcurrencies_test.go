@@ -30,7 +30,7 @@ func TestCreateUSDTrackingPairs(t *testing.T) {
 		t.Errorf("received '%v' expected '%v'", err, errExchangeManagerRequired)
 	}
 
-	em := engine.SetupExchangeManager()
+	em := engine.NewExchangeManager()
 	_, err = CreateUSDTrackingPairs([]TrackingPair{{Exchange: eName}}, em)
 	if !errors.Is(err, engine.ErrExchangeNotFound) {
 		t.Errorf("received '%v' expected '%v'", err, engine.ErrExchangeNotFound)
@@ -53,15 +53,14 @@ func TestCreateUSDTrackingPairs(t *testing.T) {
 	cp3 := currency.NewPair(currency.LTC, currency.BTC)
 	exchB := exch.GetBase()
 	eba := exchB.CurrencyPairs.Pairs[a]
-	eba.Available = eba.Available.Add(cp)
-	eba.Enabled = eba.Enabled.Add(cp)
-	eba.Available = eba.Available.Add(cp2)
-	eba.Enabled = eba.Enabled.Add(cp2)
-	eba.Available = eba.Available.Add(cp3)
-	eba.Enabled = eba.Enabled.Add(cp3)
+	eba.Available = eba.Available.Add(cp, cp2, cp3)
+	eba.Enabled = eba.Enabled.Add(cp, cp2, cp3)
 	eba.AssetEnabled = convert.BoolPtr(true)
 
-	em.Add(exch)
+	err = em.Add(exch)
+	if !errors.Is(err, nil) {
+		t.Fatalf("received: '%v' but expected: '%v'", err, nil)
+	}
 	resp, err := CreateUSDTrackingPairs([]TrackingPair{s1}, em)
 	if !errors.Is(err, nil) {
 		t.Errorf("received '%v' expected '%v'", err, nil)
@@ -141,8 +140,7 @@ func TestFindMatchingUSDPairs(t *testing.T) {
 			expectedErr:    errCurrencyNotFoundInPairs,
 		},
 	}
-	for i := range tests {
-		tt := tests[i]
+	for _, tt := range tests {
 		t.Run(tt.description, func(t *testing.T) {
 			t.Parallel()
 			basePair, quotePair, err := findMatchingUSDPairs(tt.initialPair, tt.availablePairs)
@@ -223,8 +221,7 @@ func TestPairContainsUSD(t *testing.T) {
 			currency.NewPair(currency.BTC, currency.PAX),
 		},
 	}
-	for i := range pairs {
-		tt := pairs[i]
+	for _, tt := range pairs {
 		t.Run(tt.description, func(t *testing.T) {
 			t.Parallel()
 			resp := pairContainsUSD(tt.pair)
