@@ -214,10 +214,6 @@ func TestExists(t *testing.T) {
 		t.Errorf("received '%v' expected '%v'", err, nil)
 	}
 
-	_, err = f.getFundingForEAP(exchName, a, pair)
-	if !errors.Is(err, nil) {
-		t.Errorf("received '%v' expected '%v'", err, nil)
-	}
 	// demonstration that you don't need the original *Items
 	// to check for existence, just matching fields
 	baseCopy := Item{
@@ -234,21 +230,6 @@ func TestExists(t *testing.T) {
 		isCollateral:      baseItem.isCollateral,
 		collateralCandles: baseItem.collateralCandles,
 	}
-	quoteCopy := Item{
-		exchange:          quoteItem.exchange,
-		asset:             quoteItem.asset,
-		currency:          quoteItem.currency,
-		initialFunds:      quoteItem.initialFunds,
-		available:         quoteItem.available,
-		reserved:          quoteItem.reserved,
-		transferFee:       quoteItem.transferFee,
-		pairedWith:        quoteItem.pairedWith,
-		trackingCandles:   quoteItem.trackingCandles,
-		snapshot:          quoteItem.snapshot,
-		isCollateral:      quoteItem.isCollateral,
-		collateralCandles: quoteItem.collateralCandles,
-	}
-	quoteCopy.pairedWith = &baseCopy
 	if !f.Exists(&baseCopy) {
 		t.Errorf("received '%v' expected '%v'", false, true)
 	}
@@ -779,13 +760,16 @@ func TestUpdateCollateral(t *testing.T) {
 		currency:  currency.BTC,
 		available: decimal.NewFromInt(1336),
 	})
-	em := engine.SetupExchangeManager()
+	em := engine.NewExchangeManager()
 	exch, err := em.NewExchangeByName(exchName)
 	if err != nil {
 		t.Fatal(err)
 	}
 	exch.SetDefaults()
-	em.Add(exch)
+	err = em.Add(exch)
+	if !errors.Is(err, nil) {
+		t.Fatalf("received: '%v' but expected: '%v'", err, nil)
+	}
 	f.exchangeManager = em
 
 	expectedError = nil
@@ -917,7 +901,7 @@ func TestUpdateFundingFromLiveData(t *testing.T) {
 		t.Errorf("received '%v', expected  '%v'", err, engine.ErrNilSubsystem)
 	}
 
-	f.exchangeManager = engine.SetupExchangeManager()
+	f.exchangeManager = engine.NewExchangeManager()
 	err = f.UpdateFundingFromLiveData(false)
 	if !errors.Is(err, nil) {
 		t.Errorf("received '%v', expected  '%v'", err, nil)
@@ -925,7 +909,10 @@ func TestUpdateFundingFromLiveData(t *testing.T) {
 
 	ff := &binance.Binance{}
 	ff.SetDefaults()
-	f.exchangeManager.Add(ff)
+	err = f.exchangeManager.Add(ff)
+	if !errors.Is(err, nil) {
+		t.Fatalf("received: '%v' but expected: '%v'", err, nil)
+	}
 	err = f.UpdateFundingFromLiveData(false)
 	if !errors.Is(err, exchange.ErrCredentialsAreEmpty) {
 		t.Errorf("received '%v', expected  '%v'", err, exchange.ErrCredentialsAreEmpty)
@@ -960,7 +947,7 @@ func TestUpdateAllCollateral(t *testing.T) {
 		t.Errorf("received '%v', expected  '%v'", err, engine.ErrNilSubsystem)
 	}
 
-	f.exchangeManager = engine.SetupExchangeManager()
+	f.exchangeManager = engine.NewExchangeManager()
 	err = f.UpdateAllCollateral(false, false)
 	if !errors.Is(err, nil) {
 		t.Errorf("received '%v', expected  '%v'", err, nil)
@@ -968,7 +955,10 @@ func TestUpdateAllCollateral(t *testing.T) {
 
 	ff := &binance.Binance{}
 	ff.SetDefaults()
-	f.exchangeManager.Add(ff)
+	err = f.exchangeManager.Add(ff)
+	if !errors.Is(err, nil) {
+		t.Fatalf("received: '%v' but expected: '%v'", err, nil)
+	}
 	err = f.UpdateAllCollateral(false, false)
 	if !errors.Is(err, gctcommon.ErrNotYetImplemented) {
 		t.Errorf("received '%v', expected  '%v'", err, gctcommon.ErrNotYetImplemented)
@@ -1040,7 +1030,7 @@ func (f *fakeEvent) GetInterval() gctkline.Interval           { return gctkline.
 func (f *fakeEvent) GetAssetType() asset.Item                 { return asset.Spot }
 func (f *fakeEvent) AppendReason(string)                      {}
 func (f *fakeEvent) GetClosePrice() decimal.Decimal           { return elite }
-func (f *fakeEvent) AppendReasonf(s string, i ...interface{}) {}
+func (f *fakeEvent) AppendReasonf(_ string, _ ...interface{}) {}
 func (f *fakeEvent) GetBase() *event.Base                     { return &event.Base{} }
 func (f *fakeEvent) GetUnderlyingPair() currency.Pair         { return pair }
 func (f *fakeEvent) GetConcatReasons() string                 { return "" }

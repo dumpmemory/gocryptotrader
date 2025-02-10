@@ -13,51 +13,56 @@ import (
 
 func TestCreateKlineRequest(t *testing.T) {
 	t.Parallel()
-	_, err := CreateKlineRequest("", currency.EMPTYPAIR, currency.EMPTYPAIR, 0, 0, 0, time.Time{}, time.Time{})
+	_, err := CreateKlineRequest("", currency.EMPTYPAIR, currency.EMPTYPAIR, 0, 0, 0, time.Time{}, time.Time{}, 0)
 	if !errors.Is(err, ErrUnsetName) {
 		t.Fatalf("received: '%v', but expected '%v'", err, ErrUnsetName)
 	}
 
-	_, err = CreateKlineRequest("name", currency.EMPTYPAIR, currency.EMPTYPAIR, 0, 0, 0, time.Time{}, time.Time{})
+	_, err = CreateKlineRequest("name", currency.EMPTYPAIR, currency.EMPTYPAIR, 0, 0, 0, time.Time{}, time.Time{}, 0)
 	if !errors.Is(err, currency.ErrCurrencyPairEmpty) {
 		t.Fatalf("received: '%v', but expected '%v'", err, currency.ErrCurrencyPairEmpty)
 	}
 
 	pair := currency.NewPair(currency.BTC, currency.USDT)
-	_, err = CreateKlineRequest("name", pair, currency.EMPTYPAIR, 0, 0, 0, time.Time{}, time.Time{})
+	_, err = CreateKlineRequest("name", pair, currency.EMPTYPAIR, 0, 0, 0, time.Time{}, time.Time{}, 0)
 	if !errors.Is(err, currency.ErrCurrencyPairEmpty) {
 		t.Fatalf("received: '%v', but expected '%v'", err, currency.ErrCurrencyPairEmpty)
 	}
 
 	pair2 := pair.Upper()
-	_, err = CreateKlineRequest("name", pair, pair2, 0, 0, 0, time.Time{}, time.Time{})
+	_, err = CreateKlineRequest("name", pair, pair2, 0, 0, 0, time.Time{}, time.Time{}, 0)
 	if !errors.Is(err, asset.ErrNotSupported) {
 		t.Fatalf("received: '%v', but expected '%v'", err, asset.ErrNotSupported)
 	}
 
-	_, err = CreateKlineRequest("name", pair, pair2, asset.Spot, 0, 0, time.Time{}, time.Time{})
+	_, err = CreateKlineRequest("name", pair, pair2, asset.Spot, 0, 0, time.Time{}, time.Time{}, 0)
 	if !errors.Is(err, ErrInvalidInterval) {
 		t.Fatalf("received: '%v', but expected '%v'", err, ErrInvalidInterval)
 	}
 
-	_, err = CreateKlineRequest("name", pair, pair2, asset.Spot, OneHour, 0, time.Time{}, time.Time{})
+	_, err = CreateKlineRequest("name", pair, pair2, asset.Spot, OneHour, 0, time.Time{}, time.Time{}, 0)
 	if !errors.Is(err, ErrInvalidInterval) {
 		t.Fatalf("received: '%v', but expected '%v'", err, ErrInvalidInterval)
 	}
 
-	_, err = CreateKlineRequest("name", pair, pair2, asset.Spot, OneHour, OneMin, time.Time{}, time.Time{})
+	_, err = CreateKlineRequest("name", pair, pair2, asset.Spot, OneHour, OneMin, time.Time{}, time.Time{}, 0)
 	if !errors.Is(err, common.ErrDateUnset) {
 		t.Fatalf("received: '%v', but expected '%v'", err, common.ErrDateUnset)
 	}
 
 	start := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
-	_, err = CreateKlineRequest("name", pair, pair2, asset.Spot, OneHour, OneMin, start, time.Time{})
+	_, err = CreateKlineRequest("name", pair, pair2, asset.Spot, OneHour, OneMin, start, time.Time{}, 0)
 	if !errors.Is(err, common.ErrDateUnset) {
 		t.Fatalf("received: '%v', but expected '%v'", err, common.ErrDateUnset)
 	}
 
 	end := start.AddDate(0, 0, 1)
-	r, err := CreateKlineRequest("name", pair, pair2, asset.Spot, OneHour, OneMin, start, end)
+	_, err = CreateKlineRequest("name", pair, pair2, asset.Spot, OneHour, OneMin, start, end, 0)
+	if !errors.Is(err, errInvalidSpecificEndpointLimit) {
+		t.Fatalf("received: '%v', but expected '%v'", err, errInvalidSpecificEndpointLimit)
+	}
+
+	r, err := CreateKlineRequest("name", pair, pair2, asset.Spot, OneHour, OneMin, start, end, 1)
 	if !errors.Is(err, nil) {
 		t.Fatalf("received: '%v', but expected '%v'", err, nil)
 	}
@@ -98,7 +103,7 @@ func TestCreateKlineRequest(t *testing.T) {
 	// aligned correctly.
 	end = end.Round(0)
 	end = end.Add(time.Second * 30)
-	r, err = CreateKlineRequest("name", pair, pair2, asset.Spot, OneHour, OneMin, start, end)
+	r, err = CreateKlineRequest("name", pair, pair2, asset.Spot, OneHour, OneMin, start, end, 1)
 	if !errors.Is(err, nil) {
 		t.Fatalf("received: '%v', but expected '%v'", err, nil)
 	}
@@ -121,7 +126,7 @@ func TestGetRanges(t *testing.T) {
 		t.Fatalf("received: '%v', but expected '%v'", err, errNilRequest)
 	}
 
-	r, err = CreateKlineRequest("name", pair, pair, asset.Spot, OneHour, OneMin, start, end)
+	r, err = CreateKlineRequest("name", pair, pair, asset.Spot, OneHour, OneMin, start, end, 1)
 	if !errors.Is(err, nil) {
 		t.Fatalf("received: '%v', but expected '%v'", err, nil)
 	}
@@ -149,7 +154,7 @@ func getOneMinute() []Candle {
 var oneMinuteCandles = func() []Candle {
 	var candles []Candle
 	start := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
-	for x := 0; x < 1442; x++ { // two extra candles.
+	for x := range 1442 { // two extra candles.
 		candles = append(candles, Candle{
 			Time:   start,
 			Volume: 1,
@@ -174,7 +179,7 @@ func getOneHour() []Candle {
 var oneHourCandles = func() []Candle {
 	var candles []Candle
 	start := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
-	for x := 0; x < 24; x++ {
+	for x := range 24 {
 		candles = append(candles, Candle{
 			Time:   start,
 			Volume: 1,
@@ -203,12 +208,17 @@ func TestRequest_ProcessResponse(t *testing.T) {
 
 	r = &Request{}
 	_, err = r.ProcessResponse(nil)
-	if !errors.Is(err, errNoTimeSeriesDataToConvert) {
-		t.Fatalf("received: '%v', but expected '%v'", err, errNoTimeSeriesDataToConvert)
+	if !errors.Is(err, ErrNoTimeSeriesDataToConvert) {
+		t.Fatalf("received: '%v', but expected '%v'", err, ErrNoTimeSeriesDataToConvert)
+	}
+
+	_, err = CreateKlineRequest("name", pair, pair, asset.Spot, OneHour, OneHour, start, end, 0)
+	if !errors.Is(err, errInvalidSpecificEndpointLimit) {
+		t.Fatalf("received: '%v', but expected '%v'", err, nil)
 	}
 
 	// no conversion
-	r, err = CreateKlineRequest("name", pair, pair, asset.Spot, OneHour, OneHour, start, end)
+	r, err = CreateKlineRequest("name", pair, pair, asset.Spot, OneHour, OneHour, start, end, 1)
 	if !errors.Is(err, nil) {
 		t.Fatalf("received: '%v', but expected '%v'", err, nil)
 	}
@@ -223,7 +233,7 @@ func TestRequest_ProcessResponse(t *testing.T) {
 	}
 
 	// with conversion
-	r, err = CreateKlineRequest("name", pair, pair, asset.Spot, OneHour, OneMin, start, end)
+	r, err = CreateKlineRequest("name", pair, pair, asset.Spot, OneHour, OneMin, start, end, 1)
 	if !errors.Is(err, nil) {
 		t.Fatalf("received: '%v', but expected '%v'", err, nil)
 	}
@@ -240,7 +250,7 @@ func TestRequest_ProcessResponse(t *testing.T) {
 	// Potential partial candle
 	end = time.Now().UTC()
 	start = end.AddDate(0, 0, -5).Truncate(time.Duration(OneDay))
-	r, err = CreateKlineRequest("name", pair, pair, asset.Spot, OneDay, OneDay, start, end)
+	r, err = CreateKlineRequest("name", pair, pair, asset.Spot, OneDay, OneDay, start, end, 1)
 	if !errors.Is(err, nil) {
 		t.Fatalf("received: '%v', but expected '%v'", err, nil)
 	}
@@ -285,7 +295,7 @@ func TestRequest_ProcessResponse(t *testing.T) {
 	}
 
 	// end date far into the dark depths of future reality
-	r, err = CreateKlineRequest("name", pair, pair, asset.Spot, OneDay, OneDay, start, end.AddDate(1, 0, 0))
+	r, err = CreateKlineRequest("name", pair, pair, asset.Spot, OneDay, OneDay, start, end.AddDate(1, 0, 0), 1)
 	if !errors.Is(err, nil) {
 		t.Fatalf("received: '%v', but expected '%v'", err, nil)
 	}
@@ -333,12 +343,12 @@ func TestExtendedRequest_ProcessResponse(t *testing.T) {
 
 	rExt = &ExtendedRequest{}
 	_, err = rExt.ProcessResponse(nil)
-	if !errors.Is(err, errNoTimeSeriesDataToConvert) {
-		t.Fatalf("received: '%v', but expected '%v'", err, errNoTimeSeriesDataToConvert)
+	if !errors.Is(err, ErrNoTimeSeriesDataToConvert) {
+		t.Fatalf("received: '%v', but expected '%v'", err, ErrNoTimeSeriesDataToConvert)
 	}
 
 	// no conversion
-	r, err := CreateKlineRequest("name", pair, pair, asset.Spot, OneHour, OneHour, start, end)
+	r, err := CreateKlineRequest("name", pair, pair, asset.Spot, OneHour, OneHour, start, end, 1)
 	if !errors.Is(err, nil) {
 		t.Fatalf("received: '%v', but expected '%v'", err, nil)
 	}
@@ -361,7 +371,7 @@ func TestExtendedRequest_ProcessResponse(t *testing.T) {
 
 	// with conversion
 	ohc = getOneMinute()
-	r, err = CreateKlineRequest("name", pair, pair, asset.Spot, OneHour, OneMin, start, end)
+	r, err = CreateKlineRequest("name", pair, pair, asset.Spot, OneHour, OneMin, start, end, 1)
 	if !errors.Is(err, nil) {
 		t.Fatalf("received: '%v', but expected '%v'", err, nil)
 	}
@@ -394,5 +404,23 @@ func TestExtendedRequest_Size(t *testing.T) {
 	rExt = &ExtendedRequest{RangeHolder: &IntervalRangeHolder{Limit: 100, Ranges: []IntervalRange{{}, {}}}}
 	if rExt.Size() != 200 {
 		t.Fatalf("received: '%v', but expected '%v'", rExt.Size(), 200)
+	}
+}
+
+func TestRequest_Size(t *testing.T) {
+	t.Parallel()
+
+	var r *Request
+	if r.Size() != 0 {
+		t.Fatalf("received: '%v', but expected '%v'", r.Size(), 0)
+	}
+
+	r = &Request{
+		Start:            time.Now().Add(-time.Hour * 2).Truncate(time.Hour),
+		End:              time.Now().Truncate(time.Hour),
+		ExchangeInterval: OneHour,
+	}
+	if r.Size() != 2 {
+		t.Fatalf("received: '%v', but expected '%v'", r.Size(), 2)
 	}
 }

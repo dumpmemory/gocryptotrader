@@ -13,6 +13,7 @@ import (
 
 	"github.com/thrasher-corp/gocryptotrader/common"
 	"github.com/thrasher-corp/gocryptotrader/currency"
+	"github.com/thrasher-corp/gocryptotrader/exchanges/margin"
 	"github.com/thrasher-corp/gocryptotrader/gctrpc"
 	"github.com/urfave/cli/v2"
 )
@@ -1097,13 +1098,13 @@ var getOrdersCommand = &cli.Command{
 		&cli.StringFlag{
 			Name:        "start",
 			Usage:       "start date, optional. Will filter any results before this date",
-			Value:       time.Now().AddDate(0, -1, 0).Format(common.SimpleTimeFormat),
+			Value:       time.Now().AddDate(0, -1, 0).Format(time.DateTime),
 			Destination: &startTime,
 		},
 		&cli.StringFlag{
 			Name:        "end",
 			Usage:       "end date, optional. Will filter any results after this date",
-			Value:       time.Now().Format(common.SimpleTimeFormat),
+			Value:       time.Now().Format(time.DateTime),
 			Destination: &endTime,
 		},
 	},
@@ -1162,17 +1163,17 @@ func getOrders(c *cli.Context) error {
 		}
 	}
 	var s, e time.Time
-	s, err = time.ParseInLocation(common.SimpleTimeFormat, startTime, time.Local)
+	s, err = time.ParseInLocation(time.DateTime, startTime, time.Local)
 	if err != nil {
 		return fmt.Errorf("invalid time format for start: %v", err)
 	}
-	e, err = time.ParseInLocation(common.SimpleTimeFormat, endTime, time.Local)
+	e, err = time.ParseInLocation(time.DateTime, endTime, time.Local)
 	if err != nil {
 		return fmt.Errorf("invalid time format for end: %v", err)
 	}
 
 	if e.Before(s) {
-		return errors.New("start cannot be after end")
+		return common.ErrStartAfterEnd
 	}
 
 	conn, cancel, err := setupClient(c)
@@ -1420,6 +1421,11 @@ var submitOrderCommand = &cli.Command{
 			Name:  "asset",
 			Usage: "required asset type",
 		},
+		&cli.StringFlag{
+			Name:     "margintype",
+			Usage:    "required asset type",
+			Required: false,
+		},
 	},
 }
 
@@ -1436,6 +1442,7 @@ func submitOrder(c *cli.Context) error {
 	var price float64
 	var clientID string
 	var assetType string
+	var marginType string
 
 	if c.IsSet("exchange") {
 		exchangeName = c.String("exchange")
@@ -1510,9 +1517,20 @@ func submitOrder(c *cli.Context) error {
 		assetType = c.Args().Get(7)
 	}
 
+	if c.IsSet("margintype") {
+		marginType = c.String("margintype")
+	} else {
+		marginType = c.Args().Get(8)
+	}
+
 	assetType = strings.ToLower(assetType)
 	if !validAsset(assetType) {
 		return errInvalidAsset
+	}
+
+	marginType = strings.ToLower(marginType)
+	if !margin.IsValidString(marginType) {
+		return margin.ErrInvalidMarginType
 	}
 
 	p, err := currency.NewPairDelimiter(currencyPair, pairDelimiter)
@@ -1757,7 +1775,7 @@ func cancelOrder(c *cli.Context) error {
 
 	// pair is optional, but if it's set, do a validity check
 	var p currency.Pair
-	if len(currencyPair) > 0 {
+	if currencyPair != "" {
 		if !validPair(currencyPair) {
 			return errInvalidPair
 		}
@@ -1899,7 +1917,7 @@ func cancelBatchOrders(c *cli.Context) error {
 
 	// pair is optional, but if it's set, do a validity check
 	var p currency.Pair
-	if len(currencyPair) > 0 {
+	if currencyPair != "" {
 		if !validPair(currencyPair) {
 			return errInvalidPair
 		}
@@ -2190,19 +2208,19 @@ func addEvent(c *cli.Context) error {
 	if c.IsSet("exchange") {
 		exchangeName = c.String("exchange")
 	} else {
-		return fmt.Errorf("exchange name is required")
+		return errors.New("exchange name is required")
 	}
 
 	if c.IsSet("item") {
 		item = c.String("item")
 	} else {
-		return fmt.Errorf("item is required")
+		return errors.New("item is required")
 	}
 
 	if c.IsSet("condition") {
 		condition = c.String("condition")
 	} else {
-		return fmt.Errorf("condition is required")
+		return errors.New("condition is required")
 	}
 
 	if c.IsSet("price") {
@@ -2224,7 +2242,7 @@ func addEvent(c *cli.Context) error {
 	if c.IsSet("pair") {
 		currencyPair = c.String("pair")
 	} else {
-		return fmt.Errorf("currency pair is required")
+		return errors.New("currency pair is required")
 	}
 
 	if !validPair(currencyPair) {
@@ -2243,7 +2261,7 @@ func addEvent(c *cli.Context) error {
 	if c.IsSet("action") {
 		action = c.String("action")
 	} else {
-		return fmt.Errorf("action is required")
+		return errors.New("action is required")
 	}
 
 	p, err := currency.NewPairDelimiter(currencyPair, pairDelimiter)
@@ -2820,13 +2838,13 @@ var withdrawalRequestCommand = &cli.Command{
 				&cli.StringFlag{
 					Name:        "start",
 					Usage:       "the start date to get withdrawals from. Any withdrawal before this date will be filtered",
-					Value:       time.Now().AddDate(0, -1, 0).Format(common.SimpleTimeFormat),
+					Value:       time.Now().AddDate(0, -1, 0).Format(time.DateTime),
 					Destination: &startTime,
 				},
 				&cli.StringFlag{
 					Name:        "end",
 					Usage:       "the end date to get withdrawals from. Any withdrawal after this date will be filtered",
-					Value:       time.Now().Format(common.SimpleTimeFormat),
+					Value:       time.Now().Format(time.DateTime),
 					Destination: &endTime,
 				},
 				&cli.Int64Flag{
@@ -2991,17 +3009,17 @@ func withdrawlRequestByDate(c *cli.Context) error {
 		limit = limitStr
 	}
 
-	s, err := time.ParseInLocation(common.SimpleTimeFormat, startTime, time.Local)
+	s, err := time.ParseInLocation(time.DateTime, startTime, time.Local)
 	if err != nil {
 		return fmt.Errorf("invalid time format for start: %v", err)
 	}
-	e, err := time.ParseInLocation(common.SimpleTimeFormat, endTime, time.Local)
+	e, err := time.ParseInLocation(time.DateTime, endTime, time.Local)
 	if err != nil {
 		return fmt.Errorf("invalid time format for end: %v", err)
 	}
 
 	if e.Before(s) {
-		return errors.New("start cannot be after end")
+		return common.ErrStartAfterEnd
 	}
 
 	conn, cancel, err := setupClient(c)
@@ -3327,14 +3345,14 @@ var getAuditEventCommand = &cli.Command{
 			Name:        "start",
 			Aliases:     []string{"s"},
 			Usage:       "start date to search",
-			Value:       time.Now().Add(-time.Hour).Format(common.SimpleTimeFormat),
+			Value:       time.Now().Add(-time.Hour).Format(time.DateTime),
 			Destination: &startTime,
 		},
 		&cli.StringFlag{
 			Name:        "end",
 			Aliases:     []string{"e"},
 			Usage:       "end time to search",
-			Value:       time.Now().Format(common.SimpleTimeFormat),
+			Value:       time.Now().Format(time.DateTime),
 			Destination: &endTime,
 		},
 		&cli.StringFlag{
@@ -3382,18 +3400,18 @@ func getAuditEvent(c *cli.Context) error {
 		}
 	}
 
-	s, err := time.ParseInLocation(common.SimpleTimeFormat, startTime, time.Local)
+	s, err := time.ParseInLocation(time.DateTime, startTime, time.Local)
 	if err != nil {
 		return fmt.Errorf("invalid time format for start: %v", err)
 	}
 
-	e, err := time.ParseInLocation(common.SimpleTimeFormat, endTime, time.Local)
+	e, err := time.ParseInLocation(time.DateTime, endTime, time.Local)
 	if err != nil {
 		return fmt.Errorf("invalid time format for end: %v", err)
 	}
 
 	if e.Before(s) {
-		return errors.New("start cannot be after end")
+		return common.ErrStartAfterEnd
 	}
 
 	conn, cancel, err := setupClient(c)
@@ -4017,14 +4035,14 @@ var getHistoricCandlesExtendedCommand = &cli.Command{
 		},
 		&cli.StringFlag{
 			Name:        "start",
-			Usage:       "the date to begin retrieveing candles. Any candles before this date will be filtered",
-			Value:       time.Now().AddDate(0, -1, 0).Format(common.SimpleTimeFormat),
+			Usage:       "the date to begin retrieving candles. Any candles before this date will be filtered",
+			Value:       time.Now().AddDate(0, -1, 0).Format(time.DateTime),
 			Destination: &startTime,
 		},
 		&cli.StringFlag{
 			Name:        "end",
-			Usage:       "the date to end retrieveing candles. Any candles after this date will be filtered",
-			Value:       time.Now().Format(common.SimpleTimeFormat),
+			Usage:       "the date to end retrieving candles. Any candles after this date will be filtered",
+			Value:       time.Now().Format(time.DateTime),
 			Destination: &endTime,
 		},
 		&cli.BoolFlag{
@@ -4133,17 +4151,17 @@ func getHistoricCandlesExtended(c *cli.Context) error {
 
 	candleInterval := time.Duration(candleGranularity) * time.Second
 	var s, e time.Time
-	s, err = time.ParseInLocation(common.SimpleTimeFormat, startTime, time.Local)
+	s, err = time.ParseInLocation(time.DateTime, startTime, time.Local)
 	if err != nil {
 		return fmt.Errorf("invalid time format for start: %v", err)
 	}
-	e, err = time.ParseInLocation(common.SimpleTimeFormat, endTime, time.Local)
+	e, err = time.ParseInLocation(time.DateTime, endTime, time.Local)
 	if err != nil {
 		return fmt.Errorf("invalid time format for end: %v", err)
 	}
 
 	if e.Before(s) {
-		return errors.New("start cannot be after end")
+		return common.ErrStartAfterEnd
 	}
 
 	conn, cancel, err := setupClient(c)
@@ -4210,13 +4228,13 @@ var findMissingSavedCandleIntervalsCommand = &cli.Command{
 		&cli.StringFlag{
 			Name:        "start",
 			Usage:       "<start> rounded down to the nearest hour",
-			Value:       time.Now().AddDate(0, -1, 0).Truncate(time.Hour).Format(common.SimpleTimeFormat),
+			Value:       time.Now().AddDate(0, -1, 0).Truncate(time.Hour).Format(time.DateTime),
 			Destination: &startTime,
 		},
 		&cli.StringFlag{
 			Name:        "end",
 			Usage:       "<end> rounded down to the nearest hour",
-			Value:       time.Now().Truncate(time.Hour).Format(common.SimpleTimeFormat),
+			Value:       time.Now().Truncate(time.Hour).Format(time.DateTime),
 			Destination: &endTime,
 		},
 	},
@@ -4282,17 +4300,17 @@ func findMissingSavedCandleIntervals(c *cli.Context) error {
 
 	candleInterval := time.Duration(candleGranularity) * time.Second
 	var s, e time.Time
-	s, err = time.ParseInLocation(common.SimpleTimeFormat, startTime, time.Local)
+	s, err = time.ParseInLocation(time.DateTime, startTime, time.Local)
 	if err != nil {
 		return fmt.Errorf("invalid time format for start: %v", err)
 	}
-	e, err = time.ParseInLocation(common.SimpleTimeFormat, endTime, time.Local)
+	e, err = time.ParseInLocation(time.DateTime, endTime, time.Local)
 	if err != nil {
 		return fmt.Errorf("invalid time format for end: %v", err)
 	}
 
 	if e.Before(s) {
-		return errors.New("start cannot be after end")
+		return common.ErrStartAfterEnd
 	}
 
 	conn, cancel, err := setupClient(c)
@@ -4371,14 +4389,14 @@ var getMarginRatesHistoryCommand = &cli.Command{
 			Name:        "start",
 			Aliases:     []string{"sd"},
 			Usage:       "<start>",
-			Value:       time.Now().AddDate(0, -1, 0).Truncate(time.Hour).Format(common.SimpleTimeFormat),
+			Value:       time.Now().AddDate(0, -1, 0).Truncate(time.Hour).Format(time.DateTime),
 			Destination: &startTime,
 		},
 		&cli.StringFlag{
 			Name:        "end",
 			Aliases:     []string{"ed"},
 			Usage:       "<end>",
-			Value:       time.Now().Format(common.SimpleTimeFormat),
+			Value:       time.Now().Format(time.DateTime),
 			Destination: &endTime,
 		},
 		&cli.BoolFlag{
@@ -4503,11 +4521,11 @@ func getMarginRatesHistory(c *cli.Context) error {
 	}
 
 	var s, e time.Time
-	s, err = time.ParseInLocation(common.SimpleTimeFormat, startTime, time.Local)
+	s, err = time.ParseInLocation(time.DateTime, startTime, time.Local)
 	if err != nil {
 		return fmt.Errorf("invalid time format for start: %v", err)
 	}
-	e, err = time.ParseInLocation(common.SimpleTimeFormat, endTime, time.Local)
+	e, err = time.ParseInLocation(time.DateTime, endTime, time.Local)
 	if err != nil {
 		return fmt.Errorf("invalid time format for end: %v", err)
 	}
@@ -4536,6 +4554,93 @@ func getMarginRatesHistory(c *cli.Context) error {
 			GetBorrowRates:     getBorrowRates,
 			GetBorrowCosts:     getBorrowCosts,
 			IncludeAllRates:    includeAllRates,
+		})
+	if err != nil {
+		return err
+	}
+
+	jsonOutput(result)
+	return nil
+}
+
+var getCurrencyTradeURLCommand = &cli.Command{
+	Name:      "getcurrencytradeurl",
+	Usage:     "returns the trading url of the instrument",
+	ArgsUsage: "<exchange> <asset> <pair>",
+	Action:    getCurrencyTradeURL,
+	Flags: []cli.Flag{
+		&cli.StringFlag{
+			Name:    "exchange",
+			Aliases: []string{"e"},
+			Usage:   "the exchange to retrieve margin rates from",
+		},
+		&cli.StringFlag{
+			Name:    "asset",
+			Aliases: []string{"a"},
+			Usage:   "the asset type of the currency pair",
+		},
+		&cli.StringFlag{
+			Name:    "pair",
+			Aliases: []string{"p"},
+			Usage:   "the currency pair",
+		},
+	},
+}
+
+func getCurrencyTradeURL(c *cli.Context) error {
+	if c.NArg() == 0 && c.NumFlags() == 0 {
+		return cli.ShowSubcommandHelp(c)
+	}
+
+	var exchangeName string
+	if c.IsSet("exchange") {
+		exchangeName = c.String("exchange")
+	} else {
+		exchangeName = c.Args().First()
+	}
+
+	var assetType string
+	if c.IsSet("asset") {
+		assetType = c.String("asset")
+	} else {
+		assetType = c.Args().Get(1)
+	}
+
+	if !validAsset(assetType) {
+		return errInvalidAsset
+	}
+
+	var cp string
+	if c.IsSet("pair") {
+		cp = c.String("pair")
+	} else {
+		cp = c.Args().Get(2)
+	}
+
+	if !validPair(cp) {
+		return errInvalidPair
+	}
+	p, err := currency.NewPairDelimiter(cp, pairDelimiter)
+	if err != nil {
+		return err
+	}
+
+	conn, cancel, err := setupClient(c)
+	if err != nil {
+		return err
+	}
+	defer closeConn(conn, cancel)
+
+	client := gctrpc.NewGoCryptoTraderServiceClient(conn)
+	result, err := client.GetCurrencyTradeURL(c.Context,
+		&gctrpc.GetCurrencyTradeURLRequest{
+			Exchange: exchangeName,
+			Asset:    assetType,
+			Pair: &gctrpc.CurrencyPair{
+				Delimiter: p.Delimiter,
+				Base:      p.Base.String(),
+				Quote:     p.Quote.String(),
+			},
 		})
 	if err != nil {
 		return err

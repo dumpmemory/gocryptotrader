@@ -32,13 +32,11 @@ const (
 	github               = "GitHub Sha Check"
 	htmlScrape           = "HTML String Check"
 	pathBinance          = "https://binance-docs.github.io/apidocs/spot/en/#change-log"
-	pathOkCoin           = "https://www.okcoin.com/docs/en/#change-change"
 	pathBTSE             = "https://www.btse.com/apiexplorer/spot/#btse-spot-api"
 	pathBitfinex         = "https://docs.bitfinex.com/docs/changelog"
 	pathBitmex           = "https://www.bitmex.com/static/md/en-US/apiChangelog"
 	pathANX              = "https://anxv3.docs.apiary.io/"
 	pathPoloniex         = "https://docs.poloniex.com/#changelog"
-	pathIbBit            = "https://api.itbit.com/docs"
 	pathBTCMarkets       = "https://api.btcmarkets.net/openapi/info/index.yaml"
 	pathEXMO             = "https://exmo.com/en/api/"
 	pathBitstamp         = "https://www.bitstamp.net/api/"
@@ -64,7 +62,6 @@ const (
 	createCard           = "UpdatesCard"
 	createChecklist      = "UpdatesChecklist"
 	btcMarkets           = "BTC Markets"
-	okcoin               = "OkCoin International"
 )
 
 var (
@@ -104,19 +101,19 @@ func main() {
 		os.Exit(1)
 	}
 
-	err = log.SetupGlobalLogger()
+	err = log.SetupGlobalLogger("cmd/apicheck", false)
 	if err != nil {
 		fmt.Printf("Could not setup global logger. Error: %v.\n", err)
 		os.Exit(1)
 	}
 	configData, err = readFileData(jsonFile)
 	if err != nil {
-		log.Error(log.Global, err)
+		log.Errorln(log.Global, err)
 		os.Exit(1)
 	}
 	testConfigData, err = readFileData(testJSONFile)
 	if err != nil {
-		log.Error(log.Global, err)
+		log.Errorln(log.Global, err)
 		os.Exit(1)
 	}
 	usageData = testConfigData
@@ -130,7 +127,7 @@ func main() {
 			data.Repo = path
 			err = addExch(exchangeName, checkType, data, false)
 			if err != nil {
-				log.Error(log.Global, err)
+				log.Errorln(log.Global, err)
 				os.Exit(1)
 			}
 		case htmlScrape:
@@ -145,7 +142,7 @@ func main() {
 			data.Path = path
 			err = addExch(exchangeName, checkType, data, false)
 			if err != nil {
-				log.Error(log.Global, err)
+				log.Errorln(log.Global, err)
 				os.Exit(1)
 			}
 		}
@@ -156,7 +153,7 @@ func main() {
 		if trelloBoardName != "" {
 			a, err = trelloGetBoardID()
 			if err != nil {
-				log.Error(log.Global, err)
+				log.Errorln(log.Global, err)
 				os.Exit(1)
 			}
 			trelloBoardID = a
@@ -164,25 +161,25 @@ func main() {
 		if create {
 			err = createAndSet()
 			if err != nil {
-				log.Error(log.Global, err)
+				log.Errorln(log.Global, err)
 				os.Exit(1)
 			}
 		}
 		err = updateFile(backupFile)
 		if err != nil {
-			log.Error(log.Global, err)
+			log.Errorln(log.Global, err)
 			os.Exit(1)
 		}
 		err = checkUpdates(jsonFile)
 		if err != nil {
-			log.Error(log.Global, err)
+			log.Errorln(log.Global, err)
 			os.Exit(1)
 		}
 	} else {
 		log.Warnln(log.Global, "This is a test update since API keys are not set.")
 		err := checkUpdates(testJSONFile)
 		if err != nil {
-			log.Error(log.Global, err)
+			log.Errorln(log.Global, err)
 			os.Exit(1)
 		}
 		log.Infoln(log.Global, "API update check completed successfully")
@@ -310,7 +307,7 @@ func checkMissingExchanges() []string {
 	}
 	supportedExchs := exchange.Exchanges
 	for z := 0; z < len(supportedExchs); {
-		if common.StringDataContainsInsensitive(tempArray, supportedExchs[z]) {
+		if common.StringSliceContainsInsensitive(tempArray, supportedExchs[z]) {
 			supportedExchs = append(supportedExchs[:z], supportedExchs[z+1:]...)
 			continue
 		}
@@ -468,8 +465,6 @@ func checkChangeLog(htmlData *HTMLScrapingData) (string, error) {
 		dataStrings, err = htmlScrapeANX(htmlData)
 	case pathPoloniex:
 		dataStrings, err = htmlScrapePoloniex(htmlData)
-	case pathIbBit:
-		dataStrings, err = htmlScrapeItBit(htmlData)
 	case pathBTCMarkets:
 		dataStrings, err = htmlScrapeBTCMarkets(htmlData)
 	case pathEXMO:
@@ -486,8 +481,6 @@ func checkChangeLog(htmlData *HTMLScrapingData) (string, error) {
 		dataStrings, err = htmlScrapeAlphaPoint(htmlData)
 	case pathYobit:
 		dataStrings, err = htmlScrapeYobit(htmlData)
-	case pathOkCoin:
-		dataStrings, err = htmlScrapeOk(htmlData)
 	default:
 		dataStrings, err = htmlScrapeDefault(htmlData)
 	}
@@ -550,7 +543,7 @@ func addExch(exchName, checkType string, data interface{}, isUpdate bool) error 
 	}
 	if canUpdateTrello() {
 		if !isUpdate {
-			err := trelloCreateNewCheck(fmt.Sprintf("%s 1", exchName))
+			err := trelloCreateNewCheck(exchName + " 1")
 			if err != nil {
 				return err
 			}
@@ -566,7 +559,7 @@ func fillData(exchName, checkType string, data interface{}) (ExchangeInfo, error
 	case github:
 		tempData, ok := data.(GithubData)
 		if !ok {
-			return ExchangeInfo{}, errors.New("unable to type assert GithubData")
+			return ExchangeInfo{}, common.GetTypeAssertError("GithubData", data)
 		}
 		tempSha, err := getSha(path)
 		if err != nil {
@@ -583,7 +576,7 @@ func fillData(exchName, checkType string, data interface{}) (ExchangeInfo, error
 	case htmlScrape:
 		tempData, ok := data.(HTMLScrapingData)
 		if !ok {
-			return ExchangeInfo{}, errors.New("unable to type assert HTMLScrapingData")
+			return ExchangeInfo{}, common.GetTypeAssertError("HTMLScrapingData", data)
 		}
 		checkStr, err := checkChangeLog(&tempData)
 		if err != nil {
@@ -963,41 +956,6 @@ loop:
 	return resp, nil
 }
 
-// htmlScrapeItBit gets the check string for ItBit Exchange
-func htmlScrapeItBit(htmlData *HTMLScrapingData) ([]string, error) {
-	var resp []string
-	temp, err := sendHTTPGetRequest(htmlData.Path, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer temp.Body.Close()
-	tokenizer := html.NewTokenizer(temp.Body)
-loop:
-	for {
-		next := tokenizer.Next()
-		switch next {
-		case html.ErrorToken:
-			break loop
-		case html.StartTagToken:
-			token := tokenizer.Token()
-			if token.Data == htmlData.TokenData {
-				for _, z := range token.Attr {
-					if z.Key == htmlData.Key {
-						r, err := regexp.Compile(htmlData.RegExp)
-						if err != nil {
-							return resp, err
-						}
-						if r.MatchString(z.Val) {
-							resp = append(resp, z.Val)
-						}
-					}
-				}
-			}
-		}
-	}
-	return resp, nil
-}
-
 // htmlScrapeBitstamp gets the check string for Bitstamp Exchange
 func htmlScrapeBitstamp(htmlData *HTMLScrapingData) ([]string, error) {
 	temp, err := sendHTTPGetRequest(htmlData.Path, nil)
@@ -1181,13 +1139,13 @@ func nameStateChanges(currentName, currentState string) (string, error) {
 	var num int64
 	var err error
 	switch currentName {
-	case btcMarkets, okcoin:
+	case btcMarkets:
 		if strings.Count(currentName, " ") == 2 {
 			exists = true
 		}
 		name = fmt.Sprintf("%s %s", strings.Split(currentName, " ")[0], strings.Split(currentName, " ")[1])
 		if !exists {
-			return fmt.Sprintf("%s 1", name), nil
+			return name + " 1", nil
 		}
 		num, err = strconv.ParseInt(strings.Split(currentName, " ")[2], 10, 64)
 		if err != nil {
@@ -1198,7 +1156,7 @@ func nameStateChanges(currentName, currentState string) (string, error) {
 			exists = true
 			name = strings.Split(currentName, " ")[0]
 			if !exists {
-				return fmt.Sprintf("%s 1", name), nil
+				return name + " 1", nil
 			}
 			num, err = strconv.ParseInt(strings.Split(currentName, " ")[1], 10, 64)
 			if err != nil {
@@ -1206,7 +1164,7 @@ func nameStateChanges(currentName, currentState string) (string, error) {
 			}
 		}
 		if !exists {
-			return fmt.Sprintf("%s 1", name), nil
+			return name + " 1", nil
 		}
 	}
 
@@ -1264,11 +1222,11 @@ func sendGetReq(path string, result interface{}) error {
 	if strings.Contains(path, "github") {
 		requester, err = request.New("Apichecker",
 			common.NewHTTPClientWithTimeout(exchange.DefaultHTTPTimeout),
-			request.WithLimiter(request.NewBasicRateLimit(time.Hour, 60)))
+			request.WithLimiter(request.NewBasicRateLimit(time.Hour, 60, 1)))
 	} else {
 		requester, err = request.New("Apichecker",
 			common.NewHTTPClientWithTimeout(exchange.DefaultHTTPTimeout),
-			request.WithLimiter(request.NewBasicRateLimit(time.Second, 100)))
+			request.WithLimiter(request.NewBasicRateLimit(time.Second, 100, 1)))
 	}
 	if err != nil {
 		return err
@@ -1280,14 +1238,14 @@ func sendGetReq(path string, result interface{}) error {
 		Verbose: verbose}
 	return requester.SendPayload(context.Background(), request.Unset, func() (*request.Item, error) {
 		return item, nil
-	})
+	}, request.UnauthenticatedRequest)
 }
 
 // sendAuthReq sends auth req
 func sendAuthReq(method, path string, result interface{}) error {
 	requester, err := request.New("Apichecker",
 		common.NewHTTPClientWithTimeout(exchange.DefaultHTTPTimeout),
-		request.WithLimiter(request.NewBasicRateLimit(time.Second*10, 100)))
+		request.WithLimiter(request.NewBasicRateLimit(time.Second*10, 100, 1)))
 	if err != nil {
 		return err
 	}
@@ -1298,7 +1256,7 @@ func sendAuthReq(method, path string, result interface{}) error {
 		Verbose: verbose}
 	return requester.SendPayload(context.Background(), request.Unset, func() (*request.Item, error) {
 		return item, nil
-	})
+	}, request.AuthenticatedRequest)
 }
 
 // trelloGetBoardID gets all board ids on trello for a given user

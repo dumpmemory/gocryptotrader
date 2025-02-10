@@ -7,6 +7,7 @@ import (
 	"github.com/gofrs/uuid"
 	"github.com/thrasher-corp/gocryptotrader/currency"
 	"github.com/thrasher-corp/gocryptotrader/exchanges/asset"
+	"github.com/thrasher-corp/gocryptotrader/exchanges/margin"
 )
 
 // var error definitions
@@ -19,14 +20,19 @@ var (
 	ErrPairIsEmpty                = errors.New("order pair is empty")
 	ErrAssetNotSet                = errors.New("order asset type is not set")
 	ErrSideIsInvalid              = errors.New("order side is invalid")
+	ErrCollateralInvalid          = errors.New("collateral type is invalid")
 	ErrTypeIsInvalid              = errors.New("order type is invalid")
 	ErrAmountIsInvalid            = errors.New("order amount is equal or less than zero")
 	ErrPriceMustBeSetIfLimitOrder = errors.New("order price must be set if limit order type is desired")
 	ErrOrderIDNotSet              = errors.New("order id or client order id is not set")
+	ErrSubmitLeverageNotSupported = errors.New("leverage is not supported via order submission")
+	ErrClientOrderIDNotSupported  = errors.New("client order id not supported")
+	ErrUnsupportedOrderType       = errors.New("unsupported order type")
 	// ErrNoRates is returned when no margin rates are returned when they are expected
-	ErrNoRates = errors.New("no rates")
+	ErrNoRates         = errors.New("no rates")
+	ErrCannotLiquidate = errors.New("cannot liquidate position")
 
-	errCannotLiquidate = errors.New("cannot liquidate position")
+	ErrUnknownTrackingMode = errors.New("unknown tracking mode")
 )
 
 // Submit contains all properties of an order that may be required
@@ -59,16 +65,40 @@ type Submit struct {
 	QuoteAmount float64
 	// TriggerPrice is mandatory if order type `Stop, Stop Limit or Take Profit`
 	// See btcmarkets_wrapper.go.
-	TriggerPrice  float64
-	ClientID      string // TODO: Shift to credentials
-	ClientOrderID string
+	TriggerPrice float64
+
+	// added to represent a unified trigger price type information such as LastPrice, MarkPrice, and IndexPrice
+	// https://bybit-exchange.github.io/docs/v5/order/create-order
+	TriggerPriceType PriceType
+	ClientID         string // TODO: Shift to credentials
+	ClientOrderID    string
+
+	// The system will first borrow you funds at the optimal interest rate and then place an order for you.
+	// see kucoin_wrapper.go
+	AutoBorrow bool
+
+	// MarginType such as isolated or cross margin for when an exchange
+	// supports margin type definition when submitting an order eg okx
+	MarginType margin.Type
 	// RetrieveFees use if an API submit order response does not return fees
 	// enabling this will perform additional request(s) to retrieve them
 	// and set it in the SubmitResponse
 	RetrieveFees bool
 	// RetrieveFeeDelay some exchanges take time to properly save order data
 	// and cannot retrieve fees data immediately
-	RetrieveFeeDelay time.Duration
+	RetrieveFeeDelay    time.Duration
+	RiskManagementModes RiskManagementModes
+
+	// Hidden when enabled orders not displaying in order book.
+	Hidden bool
+
+	// Iceberg specifies whether or not only visible portions of orders are shown in iceberg orders
+	Iceberg bool
+
+	// TrackingMode specifies the way trailing stop and chase orders follow the market price or ask/bid prices.
+	// See: https://www.okx.com/docs-v5/en/#order-book-trading-algo-trading-post-place-algo-order
+	TrackingMode  TrackingMode
+	TrackingValue float64
 }
 
 // SubmitResponse is what is returned after submitting an order to an exchange
@@ -79,17 +109,18 @@ type SubmitResponse struct {
 	Pair      currency.Pair
 	AssetType asset.Item
 
-	ImmediateOrCancel bool
-	FillOrKill        bool
-	PostOnly          bool
-	ReduceOnly        bool
-	Leverage          float64
-	Price             float64
-	Amount            float64
-	QuoteAmount       float64
-	TriggerPrice      float64
-	ClientID          string
-	ClientOrderID     string
+	ImmediateOrCancel    bool
+	FillOrKill           bool
+	PostOnly             bool
+	ReduceOnly           bool
+	Leverage             float64
+	Price                float64
+	AverageExecutedPrice float64
+	Amount               float64
+	QuoteAmount          float64
+	TriggerPrice         float64
+	ClientID             string
+	ClientOrderID        string
 
 	LastUpdated time.Time
 	Date        time.Time
@@ -99,7 +130,21 @@ type SubmitResponse struct {
 	Fee         float64
 	FeeAsset    currency.Code
 	Cost        float64
+
+	BorrowSize  float64
+	LoanApplyID string
+	MarginType  margin.Type
 }
+
+// TrackingMode defines how the stop price follows the market price.
+type TrackingMode uint8
+
+// Defined package tracking modes
+const (
+	UnknownTrackingMode TrackingMode = iota
+	Distance                         // Distance fixed amount away from the market price
+	Percentage                       // Percentage fixed percentage away from the market price
+)
 
 // Modify contains all properties of an order
 // that may be updated after it has been created
@@ -121,6 +166,12 @@ type Modify struct {
 	Price             float64
 	Amount            float64
 	TriggerPrice      float64
+
+	// added to represent a unified trigger price type information such as LastPrice, MarkPrice, and IndexPrice
+	// https://bybit-exchange.github.io/docs/v5/order/create-order
+	TriggerPriceType PriceType
+
+	RiskManagementModes RiskManagementModes
 }
 
 // ModifyResponse is an order modifying return type
@@ -161,6 +212,7 @@ type Detail struct {
 	Leverage             float64
 	Price                float64
 	Amount               float64
+	ContractAmount       float64
 	LimitPriceUpper      float64
 	LimitPriceLower      float64
 	TriggerPrice         float64
@@ -187,7 +239,9 @@ type Detail struct {
 	CloseTime            time.Time
 	LastUpdated          time.Time
 	Pair                 currency.Pair
+	MarginType           margin.Type
 	Trades               []TradeHistory
+	SettlementCurrency   currency.Code
 }
 
 // Filter contains all properties an order can be filtered for
@@ -222,6 +276,7 @@ type Cancel struct {
 	Side          Side
 	AssetType     asset.Item
 	Pair          currency.Pair
+	MarginType    margin.Type
 }
 
 // CancelAllResponse returns the status from attempting to
@@ -253,17 +308,21 @@ type TradeHistory struct {
 	Total       float64
 }
 
-// GetOrdersRequest used for GetOrderHistory and GetOpenOrders wrapper functions
-type GetOrdersRequest struct {
-	Type      Type
-	Side      Side
-	StartTime time.Time
-	EndTime   time.Time
-	OrderID   string
+// MultiOrderRequest used for GetOrderHistory and GetOpenOrders wrapper functions
+type MultiOrderRequest struct {
 	// Currencies Empty array = all currencies. Some endpoints only support
 	// singular currency enquiries
 	Pairs     currency.Pairs
 	AssetType asset.Item
+	Type      Type
+	Side      Side
+	StartTime time.Time
+	EndTime   time.Time
+	// FromOrderID for some APIs require order history searching
+	// from a specific orderID rather than via timestamps
+	FromOrderID string
+
+	MarginType margin.Type
 }
 
 // Status defines order status types
@@ -277,6 +336,7 @@ const (
 	Active
 	PartiallyCancelled
 	PartiallyFilled
+	PartiallyFilledCancelled
 	Filled
 	Cancelled
 	PendingCancel
@@ -291,6 +351,7 @@ const (
 	Pending
 	Cancelling
 	Liquidated
+	STP
 )
 
 // Type enforces a standard for order types across the code base
@@ -315,6 +376,12 @@ const (
 	Liquidation
 	Trigger
 	OptimalLimitIOC
+	OCO                              // One-cancels-the-other order
+	ConditionalStop                  // One-way stop order
+	MarketMakerProtection            // market-maker-protection used with portfolio margin mode. See https://www.okx.com/docs-v5/en/#order-book-trading-trade-post-place-order
+	MarketMakerProtectionAndPostOnly // market-maker-protection and post-only mode. Used in Okx exchange orders.
+	TWAP                             // time-weighted average price.
+	Chase                            // chase order. See https://www.okx.com/docs-v5/en/#order-book-trading-algo-trading-post-place-algo-order
 )
 
 // Side enforces a standard for order sides across the code base
@@ -368,5 +435,40 @@ type ClassificationError struct {
 
 // FilteredOrders defines orders that have been filtered at the wrapper level
 // forcing required filter operations when calling method Filter() on
-// GetOrdersRequest.
+// MultiOrderRequest.
 type FilteredOrders []Detail
+
+// RiskManagement represents a risk management detail information.
+type RiskManagement struct {
+	Enabled          bool
+	TriggerPriceType PriceType
+	Price            float64
+
+	// LimitPrice limit order price when stop-loss or take-profit risk management method is triggered
+	LimitPrice float64
+	// OrderType order type when stop-loss or take-profit risk management method is triggered.
+	OrderType Type
+}
+
+// RiskManagementModes represents take-profit and stop-loss risk management methods.
+type RiskManagementModes struct {
+	// Mode take-profit/stop-loss mode
+	Mode       string
+	TakeProfit RiskManagement
+	StopLoss   RiskManagement
+
+	// StopEntry stop: 'entry': Triggers when the last trade price changes to a value at or above the stopPrice.
+	// see: https://www.kucoin.com/docs/rest/spot-trading/stop-order/introduction
+	StopEntry RiskManagement
+}
+
+// PriceType enforces a standard for price types used for take-profit and stop-loss trigger types
+type PriceType uint8
+
+// price types
+const (
+	LastPrice  PriceType = 0
+	IndexPrice PriceType = 1 << iota
+	MarkPrice
+	UnknownPriceType
+)

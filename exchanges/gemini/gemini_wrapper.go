@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"sort"
 	"strconv"
-	"sync"
+	"strings"
 	"time"
 
 	"github.com/thrasher-corp/gocryptotrader/common"
@@ -17,6 +17,8 @@ import (
 	"github.com/thrasher-corp/gocryptotrader/exchanges/account"
 	"github.com/thrasher-corp/gocryptotrader/exchanges/asset"
 	"github.com/thrasher-corp/gocryptotrader/exchanges/deposit"
+	"github.com/thrasher-corp/gocryptotrader/exchanges/fundingrate"
+	"github.com/thrasher-corp/gocryptotrader/exchanges/futures"
 	"github.com/thrasher-corp/gocryptotrader/exchanges/kline"
 	"github.com/thrasher-corp/gocryptotrader/exchanges/order"
 	"github.com/thrasher-corp/gocryptotrader/exchanges/orderbook"
@@ -28,29 +30,6 @@ import (
 	"github.com/thrasher-corp/gocryptotrader/log"
 	"github.com/thrasher-corp/gocryptotrader/portfolio/withdraw"
 )
-
-// GetDefaultConfig returns a default exchange config
-func (g *Gemini) GetDefaultConfig(ctx context.Context) (*config.Exchange, error) {
-	g.SetDefaults()
-	exchCfg := new(config.Exchange)
-	exchCfg.Name = g.Name
-	exchCfg.HTTPTimeout = exchange.DefaultHTTPTimeout
-	exchCfg.BaseCurrencies = g.BaseCurrencies
-
-	err := g.SetupDefaults(exchCfg)
-	if err != nil {
-		return nil, err
-	}
-
-	if g.Features.Supports.RESTCapabilities.AutoPairUpdates {
-		err := g.UpdateTradablePairs(ctx, true)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return exchCfg, nil
-}
 
 // SetDefaults sets package defaults for gemini exchange
 func (g *Gemini) SetDefaults() {
@@ -110,11 +89,12 @@ func (g *Gemini) SetDefaults() {
 		Enabled: exchange.FeaturesEnabled{
 			AutoPairUpdates: true,
 		},
+		Subscriptions: defaultSubscriptions.Clone(),
 	}
 
 	g.Requester, err = request.New(g.Name,
 		common.NewHTTPClientWithTimeout(exchange.DefaultHTTPTimeout),
-		request.WithLimiter(SetRateLimit()))
+		request.WithLimiter(GetRateLimit()))
 	if err != nil {
 		log.Errorln(log.ExchangeSys, err)
 	}
@@ -126,7 +106,7 @@ func (g *Gemini) SetDefaults() {
 	if err != nil {
 		log.Errorln(log.ExchangeSys, err)
 	}
-	g.Websocket = stream.New()
+	g.Websocket = stream.NewWebsocket()
 	g.WebsocketResponseMaxLimit = exchange.DefaultWebsocketResponseMaxLimit
 	g.WebsocketResponseCheckTimeout = exchange.DefaultWebsocketResponseCheckTimeout
 	g.WebsocketOrderbookBufferLimit = exchange.DefaultWebsocketOrderbookBufferLimit
@@ -150,7 +130,7 @@ func (g *Gemini) Setup(exch *config.Exchange) error {
 	if exch.UseSandbox {
 		err = g.API.Endpoints.SetRunning(exchange.RestSpot.String(), geminiSandboxAPIURL)
 		if err != nil {
-			log.Error(log.ExchangeSys, err)
+			log.Errorln(log.ExchangeSys, err)
 		}
 	}
 
@@ -160,21 +140,20 @@ func (g *Gemini) Setup(exch *config.Exchange) error {
 	}
 
 	err = g.Websocket.Setup(&stream.WebsocketSetup{
-		ExchangeConfig:         exch,
-		DefaultURL:             geminiWebsocketEndpoint,
-		RunningURL:             wsRunningURL,
-		Connector:              g.WsConnect,
-		Subscriber:             g.Subscribe,
-		Unsubscriber:           g.Unsubscribe,
-		GenerateSubscriptions:  g.GenerateDefaultSubscriptions,
-		ConnectionMonitorDelay: exch.ConnectionMonitorDelay,
-		Features:               &g.Features.Supports.WebsocketCapabilities,
+		ExchangeConfig:        exch,
+		DefaultURL:            geminiWebsocketEndpoint,
+		RunningURL:            wsRunningURL,
+		Connector:             g.WsConnect,
+		Subscriber:            g.Subscribe,
+		Unsubscriber:          g.Unsubscribe,
+		GenerateSubscriptions: g.generateSubscriptions,
+		Features:              &g.Features.Supports.WebsocketCapabilities,
 	})
 	if err != nil {
 		return err
 	}
 
-	err = g.Websocket.SetupNewConnection(stream.ConnectionSetup{
+	err = g.Websocket.SetupNewConnection(&stream.ConnectionSetup{
 		ResponseCheckTimeout: exch.WebsocketResponseCheckTimeout,
 		ResponseMaxLimit:     exch.WebsocketResponseMaxLimit,
 		URL:                  geminiWebsocketEndpoint + "/v2/" + geminiWsMarketData,
@@ -183,93 +162,12 @@ func (g *Gemini) Setup(exch *config.Exchange) error {
 		return err
 	}
 
-	return g.Websocket.SetupNewConnection(stream.ConnectionSetup{
+	return g.Websocket.SetupNewConnection(&stream.ConnectionSetup{
 		ResponseCheckTimeout: exch.WebsocketResponseCheckTimeout,
 		ResponseMaxLimit:     exch.WebsocketResponseMaxLimit,
 		URL:                  geminiWebsocketEndpoint + "/v1/" + geminiWsOrderEvents,
 		Authenticated:        true,
 	})
-}
-
-// Start starts the Gemini go routine
-func (g *Gemini) Start(ctx context.Context, wg *sync.WaitGroup) error {
-	if wg == nil {
-		return fmt.Errorf("%T %w", wg, common.ErrNilPointer)
-	}
-	wg.Add(1)
-	go func() {
-		g.Run(ctx)
-		wg.Done()
-	}()
-	return nil
-}
-
-// Run implements the Gemini wrapper
-func (g *Gemini) Run(ctx context.Context) {
-	if g.Verbose {
-		g.PrintEnabledPairs()
-	}
-
-	forceUpdate := false
-	if !g.BypassConfigFormatUpgrades {
-		format, err := g.GetPairFormat(asset.Spot, false)
-		if err != nil {
-			log.Errorf(log.ExchangeSys, "%s failed to get enabled currencies. Err %s\n",
-				g.Name,
-				err)
-			return
-		}
-
-		enabled, err := g.CurrencyPairs.GetPairs(asset.Spot, true)
-		if err != nil {
-			log.Errorf(log.ExchangeSys, "%s failed to get enabled currencies. Err %s\n",
-				g.Name,
-				err)
-			return
-		}
-
-		avail, err := g.CurrencyPairs.GetPairs(asset.Spot, false)
-		if err != nil {
-			log.Errorf(log.ExchangeSys, "%s failed to get available currencies. Err %s\n",
-				g.Name,
-				err)
-			return
-		}
-
-		if !common.StringDataContains(enabled.Strings(), format.Delimiter) ||
-			!common.StringDataContains(avail.Strings(), format.Delimiter) {
-			var enabledPairs currency.Pairs
-			enabledPairs, err = currency.NewPairsFromStrings([]string{
-				currency.BTC.String() + format.Delimiter + currency.USD.String()})
-			if err != nil {
-				log.Errorf(log.ExchangeSys, "%s failed to update currencies. Err %s\n",
-					g.Name,
-					err)
-			} else {
-				log.Warnf(log.ExchangeSys, exchange.ResetConfigPairsWarningMessage, g.Name, asset.Spot, enabledPairs)
-				forceUpdate = true
-
-				err = g.UpdatePairs(enabledPairs, asset.Spot, true, true)
-				if err != nil {
-					log.Errorf(log.ExchangeSys,
-						"%s failed to update currencies. Err: %s\n",
-						g.Name,
-						err)
-				}
-			}
-		}
-	}
-
-	if !g.GetEnabledFeatures().AutoPairUpdates && !forceUpdate {
-		return
-	}
-	err := g.UpdateTradablePairs(ctx, forceUpdate)
-	if err != nil {
-		log.Errorf(log.ExchangeSys,
-			"%s failed to update tradable pairs. Err: %s",
-			g.Name,
-			err)
-	}
 }
 
 // FetchTradablePairs returns a list of the exchanges tradable pairs
@@ -278,26 +176,26 @@ func (g *Gemini) FetchTradablePairs(ctx context.Context, a asset.Item) (currency
 		return nil, asset.ErrNotSupported
 	}
 
-	symbols, err := g.GetSymbols(ctx)
+	details, err := g.GetSymbolDetails(ctx, "all")
 	if err != nil {
 		return nil, err
 	}
-
-	pairs := make([]currency.Pair, len(symbols))
-	for x := range symbols {
-		var pair currency.Pair
-		switch len(symbols[x]) {
-		case 8:
-			pair, err = currency.NewPairFromStrings(symbols[x][0:5], symbols[x][5:])
-		case 7:
-			pair, err = currency.NewPairFromStrings(symbols[x][0:4], symbols[x][4:])
-		default:
-			pair, err = currency.NewPairFromStrings(symbols[x][0:3], symbols[x][3:])
+	pairs := make([]currency.Pair, 0, len(details))
+	for i := range details {
+		status := strings.ToLower(details[i].Status)
+		if status != "open" && status != "limit_only" {
+			continue
 		}
+		if !strings.EqualFold(details[i].ContractType, "vanilla") {
+			// TODO: add support for futures
+			continue
+		}
+
+		cp, err := currency.NewPairFromStrings(details[i].BaseCurrency, details[i].Symbol[len(details[i].BaseCurrency):])
 		if err != nil {
 			return nil, err
 		}
-		pairs[x] = pair
+		pairs = append(pairs, cp)
 	}
 	return pairs, nil
 }
@@ -309,7 +207,11 @@ func (g *Gemini) UpdateTradablePairs(ctx context.Context, forceUpdate bool) erro
 	if err != nil {
 		return err
 	}
-	return g.UpdatePairs(pairs, asset.Spot, false, forceUpdate)
+	err = g.UpdatePairs(pairs, asset.Spot, false, forceUpdate)
+	if err != nil {
+		return err
+	}
+	return g.EnsureOnePairEnabled()
 }
 
 // UpdateAccountInfo Retrieves balances for all enabled currencies for the
@@ -363,7 +265,7 @@ func (g *Gemini) FetchAccountInfo(ctx context.Context, assetType asset.Item) (ac
 }
 
 // UpdateTickers updates the ticker for all currency pairs of a given asset type
-func (g *Gemini) UpdateTickers(ctx context.Context, a asset.Item) error {
+func (g *Gemini) UpdateTickers(_ context.Context, _ asset.Item) error {
 	return common.ErrFunctionNotSupported
 }
 
@@ -426,6 +328,12 @@ func (g *Gemini) FetchOrderbook(ctx context.Context, p currency.Pair, assetType 
 
 // UpdateOrderbook updates and returns the orderbook for a currency pair
 func (g *Gemini) UpdateOrderbook(ctx context.Context, p currency.Pair, assetType asset.Item) (*orderbook.Base, error) {
+	if p.IsEmpty() {
+		return nil, currency.ErrCurrencyPairEmpty
+	}
+	if err := g.CurrencyPairs.IsAssetEnabled(assetType); err != nil {
+		return nil, err
+	}
 	book := &orderbook.Base{
 		Exchange:        g.Name,
 		Pair:            p,
@@ -442,17 +350,17 @@ func (g *Gemini) UpdateOrderbook(ctx context.Context, p currency.Pair, assetType
 		return book, err
 	}
 
-	book.Bids = make(orderbook.Items, len(orderbookNew.Bids))
+	book.Bids = make(orderbook.Tranches, len(orderbookNew.Bids))
 	for x := range orderbookNew.Bids {
-		book.Bids[x] = orderbook.Item{
+		book.Bids[x] = orderbook.Tranche{
 			Amount: orderbookNew.Bids[x].Amount,
 			Price:  orderbookNew.Bids[x].Price,
 		}
 	}
 
-	book.Asks = make(orderbook.Items, len(orderbookNew.Asks))
+	book.Asks = make(orderbook.Tranches, len(orderbookNew.Asks))
 	for x := range orderbookNew.Asks {
-		book.Asks[x] = orderbook.Item{
+		book.Asks[x] = orderbook.Tranche{
 			Amount: orderbookNew.Asks[x].Amount,
 			Price:  orderbookNew.Asks[x].Price,
 		}
@@ -464,15 +372,57 @@ func (g *Gemini) UpdateOrderbook(ctx context.Context, p currency.Pair, assetType
 	return orderbook.Get(g.Name, fPair, assetType)
 }
 
-// GetFundingHistory returns funding history, deposits and
+// GetAccountFundingHistory returns funding history, deposits and
 // withdrawals
-func (g *Gemini) GetFundingHistory(ctx context.Context) ([]exchange.FundHistory, error) {
-	return nil, common.ErrFunctionNotSupported
+func (g *Gemini) GetAccountFundingHistory(ctx context.Context) ([]exchange.FundingHistory, error) {
+	transfers, err := g.Transfers(ctx, currency.EMPTYCODE, time.Time{}, 50, "", false)
+	if err != nil {
+		return nil, err
+	}
+	resp := make([]exchange.FundingHistory, len(transfers))
+	for i := range transfers {
+		resp[i] = exchange.FundingHistory{
+			Status:          transfers[i].Status,
+			TransferID:      transfers[i].WithdrawalID,
+			Timestamp:       time.UnixMilli(transfers[i].Timestamp),
+			Currency:        transfers[i].Currency.String(),
+			Amount:          transfers[i].Amount,
+			Fee:             transfers[i].FeeAmount,
+			TransferType:    transfers[i].Type,
+			CryptoToAddress: transfers[i].Destination,
+			CryptoTxID:      transfers[i].TxHash,
+		}
+	}
+	return resp, nil
 }
 
 // GetWithdrawalsHistory returns previous withdrawals data
-func (g *Gemini) GetWithdrawalsHistory(ctx context.Context, c currency.Code, _ asset.Item) (resp []exchange.WithdrawalHistory, err error) {
-	return nil, common.ErrNotYetImplemented
+func (g *Gemini) GetWithdrawalsHistory(ctx context.Context, c currency.Code, a asset.Item) ([]exchange.WithdrawalHistory, error) {
+	if err := g.CurrencyPairs.IsAssetEnabled(a); err != nil {
+		return nil, err
+	}
+	transfers, err := g.Transfers(ctx, c, time.Time{}, 50, "", false)
+	if err != nil {
+		return nil, err
+	}
+	resp := make([]exchange.WithdrawalHistory, 0, len(transfers))
+	for i := range transfers {
+		if transfers[i].Type != "Withdrawal" {
+			continue
+		}
+		resp = append(resp, exchange.WithdrawalHistory{
+			Status:          transfers[i].Status,
+			TransferID:      transfers[i].WithdrawalID,
+			Timestamp:       time.UnixMilli(transfers[i].Timestamp),
+			Currency:        transfers[i].Currency.String(),
+			Amount:          transfers[i].Amount,
+			Fee:             transfers[i].FeeAmount,
+			TransferType:    transfers[i].Type,
+			CryptoToAddress: transfers[i].Destination,
+			CryptoTxID:      transfers[i].TxHash,
+		})
+	}
+	return resp, nil
 }
 
 // GetRecentTrades returns the most recent trades for a currency and asset
@@ -549,7 +499,7 @@ allTrades:
 
 // SubmitOrder submits a new order
 func (g *Gemini) SubmitOrder(ctx context.Context, s *order.Submit) (*order.SubmitResponse, error) {
-	if err := s.Validate(); err != nil {
+	if err := s.Validate(g.GetTradingRequirements()); err != nil {
 		return nil, err
 	}
 
@@ -557,13 +507,13 @@ func (g *Gemini) SubmitOrder(ctx context.Context, s *order.Submit) (*order.Submi
 		return nil, errors.New("only limit orders are enabled through this exchange")
 	}
 
-	fpair, err := g.FormatExchangeCurrency(s.Pair, asset.Spot)
+	fPair, err := g.FormatExchangeCurrency(s.Pair, asset.Spot)
 	if err != nil {
 		return nil, err
 	}
 
 	response, err := g.NewOrder(ctx,
-		fpair.String(),
+		fPair.String(),
 		s.Amount,
 		s.Price,
 		s.Side.String(),
@@ -597,8 +547,13 @@ func (g *Gemini) CancelOrder(ctx context.Context, o *order.Cancel) error {
 }
 
 // CancelBatchOrders cancels an orders by their corresponding ID numbers
-func (g *Gemini) CancelBatchOrders(ctx context.Context, o []order.Cancel) (order.CancelBatchResponse, error) {
-	return order.CancelBatchResponse{}, common.ErrNotYetImplemented
+func (g *Gemini) CancelBatchOrders(_ context.Context, _ []order.Cancel) (*order.CancelBatchResponse, error) {
+	return nil, common.ErrFunctionNotSupported
+}
+
+// GetServerTime returns the current exchange server time.
+func (g *Gemini) GetServerTime(_ context.Context, _ asset.Item) (time.Time, error) {
+	return time.Time{}, common.ErrFunctionNotSupported
 }
 
 // CancelAllOrders cancels all orders associated with a currency pair
@@ -619,9 +574,43 @@ func (g *Gemini) CancelAllOrders(ctx context.Context, _ *order.Cancel) (order.Ca
 }
 
 // GetOrderInfo returns order information based on order ID
-func (g *Gemini) GetOrderInfo(ctx context.Context, orderID string, pair currency.Pair, assetType asset.Item) (order.Detail, error) {
-	var orderDetail order.Detail
-	return orderDetail, common.ErrNotYetImplemented
+func (g *Gemini) GetOrderInfo(ctx context.Context, orderID string, _ currency.Pair, _ asset.Item) (*order.Detail, error) {
+	iOID, err := strconv.ParseInt(orderID, 10, 64)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := g.GetOrderStatus(ctx, iOID)
+	if err != nil {
+		return nil, err
+	}
+
+	cp, err := currency.NewPairFromString(resp.Symbol)
+	if err != nil {
+		return nil, err
+	}
+	var orderType order.Type
+	if resp.Type == "exchange limit" {
+		orderType = order.Limit
+	} else if resp.Type == "market buy" || resp.Type == "market sell" {
+		orderType = order.Market
+	}
+	var side order.Side
+	side, err = order.StringToOrderSide(resp.Side)
+	if err != nil {
+		return nil, err
+	}
+	return &order.Detail{
+		OrderID:         strconv.FormatInt(resp.OrderID, 10),
+		Amount:          resp.OriginalAmount,
+		RemainingAmount: resp.RemainingAmount,
+		Pair:            cp,
+		Date:            time.UnixMilli(resp.TimestampMS),
+		Price:           resp.Price,
+		HiddenOrder:     resp.IsHidden,
+		ClientOrderID:   resp.ClientOrderID,
+		Type:            orderType,
+		Side:            side,
+	}, nil
 }
 
 // GetDepositAddress returns a deposit address for a specified currency
@@ -680,7 +669,7 @@ func (g *Gemini) GetFeeByType(ctx context.Context, feeBuilder *exchange.FeeBuild
 }
 
 // GetActiveOrders retrieves any orders that are active/open
-func (g *Gemini) GetActiveOrders(ctx context.Context, req *order.GetOrdersRequest) (order.FilteredOrders, error) {
+func (g *Gemini) GetActiveOrders(ctx context.Context, req *order.MultiOrderRequest) (order.FilteredOrders, error) {
 	err := req.Validate()
 	if err != nil {
 		return nil, err
@@ -715,7 +704,7 @@ func (g *Gemini) GetActiveOrders(ctx context.Context, req *order.GetOrdersReques
 			orderType = order.Market
 		}
 		var side order.Side
-		side, err = order.StringToOrderSide(resp[i].Type)
+		side, err = order.StringToOrderSide(resp[i].Side)
 		if err != nil {
 			return nil, err
 		}
@@ -739,7 +728,7 @@ func (g *Gemini) GetActiveOrders(ctx context.Context, req *order.GetOrdersReques
 
 // GetOrderHistory retrieves account order information
 // Can Limit response to specific order status
-func (g *Gemini) GetOrderHistory(ctx context.Context, req *order.GetOrdersRequest) (order.FilteredOrders, error) {
+func (g *Gemini) GetOrderHistory(ctx context.Context, req *order.MultiOrderRequest) (order.FilteredOrders, error) {
 	err := req.Validate()
 	if err != nil {
 		return nil, err
@@ -806,9 +795,9 @@ func (g *Gemini) GetOrderHistory(ctx context.Context, req *order.GetOrdersReques
 	return req.Filter(g.Name, orders), nil
 }
 
-// ValidateCredentials validates current credentials used for wrapper
+// ValidateAPICredentials validates current credentials used for wrapper
 // functionality
-func (g *Gemini) ValidateCredentials(ctx context.Context, assetType asset.Item) error {
+func (g *Gemini) ValidateAPICredentials(ctx context.Context, assetType asset.Item) error {
 	_, err := g.UpdateAccountInfo(ctx, assetType)
 	return g.CheckTransientError(err)
 }
@@ -821,4 +810,54 @@ func (g *Gemini) GetHistoricCandles(_ context.Context, _ currency.Pair, _ asset.
 // GetHistoricCandlesExtended returns candles between a time period for a set time interval
 func (g *Gemini) GetHistoricCandlesExtended(_ context.Context, _ currency.Pair, _ asset.Item, _ kline.Interval, _, _ time.Time) (*kline.Item, error) {
 	return nil, common.ErrFunctionNotSupported
+}
+
+// GetFuturesContractDetails returns all contracts from the exchange by asset type
+func (g *Gemini) GetFuturesContractDetails(context.Context, asset.Item) ([]futures.Contract, error) {
+	return nil, common.ErrFunctionNotSupported
+}
+
+// UpdateOrderExecutionLimits sets exchange executions for a required asset type
+func (g *Gemini) UpdateOrderExecutionLimits(ctx context.Context, a asset.Item) error {
+	if a != asset.Spot {
+		return fmt.Errorf("%w %v", asset.ErrNotSupported, a)
+	}
+	details, err := g.GetSymbolDetails(ctx, "all")
+	if err != nil {
+		return fmt.Errorf("cannot update exchange execution limits: %w", err)
+	}
+	resp := make([]order.MinMaxLevel, 0, len(details))
+	for i := range details {
+		status := strings.ToLower(details[i].Status)
+		if status != "open" && status != "limit_only" {
+			continue
+		}
+		cp, err := currency.NewPairFromStrings(details[i].BaseCurrency, details[i].QuoteCurrency)
+		if err != nil {
+			return err
+		}
+		resp = append(resp, order.MinMaxLevel{
+			Pair:                    cp,
+			Asset:                   a,
+			AmountStepIncrementSize: details[i].TickSize,
+			MinimumBaseAmount:       details[i].MinOrderSize.Float64(),
+			QuoteStepIncrementSize:  details[i].QuoteIncrement,
+		})
+	}
+	return g.LoadLimits(resp)
+}
+
+// GetLatestFundingRates returns the latest funding rates data
+func (g *Gemini) GetLatestFundingRates(context.Context, *fundingrate.LatestRateRequest) ([]fundingrate.LatestRateResponse, error) {
+	return nil, common.ErrFunctionNotSupported
+}
+
+// GetCurrencyTradeURL returns the URL to the exchange's trade page for the given asset and currency pair
+func (g *Gemini) GetCurrencyTradeURL(_ context.Context, a asset.Item, cp currency.Pair) (string, error) {
+	_, err := g.CurrencyPairs.IsPairEnabled(cp, a)
+	if err != nil {
+		return "", err
+	}
+	cp.Delimiter = ""
+	return tradeBaseURL + cp.Upper().String(), nil
 }

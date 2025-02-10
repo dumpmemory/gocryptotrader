@@ -80,13 +80,14 @@ func StartRPCServer(server *GRPCServer) error {
 	opts := []grpc.ServerOption{
 		grpc.Creds(creds),
 		grpc.UnaryInterceptor(grpcauth.UnaryServerInterceptor(server.authenticateClient)),
+		grpc.StreamInterceptor(grpcauth.StreamServerInterceptor(server.authenticateClient)),
 	}
 	s := grpc.NewServer(opts...)
 	btrpc.RegisterBacktesterServiceServer(s, server)
 
 	go func() {
 		if err = s.Serve(lis); err != nil {
-			log.Error(log.GRPCSys, err)
+			log.Errorln(log.GRPCSys, err)
 			return
 		}
 	}()
@@ -105,7 +106,7 @@ func (s *GRPCServer) StartRPCRESTProxy() error {
 	targetDir := utils.GetTLSDir(s.config.GRPC.TLSDir)
 	creds, err := credentials.NewClientTLSFromFile(filepath.Join(targetDir, "cert.pem"), "")
 	if err != nil {
-		return fmt.Errorf("unabled to start gRPC proxy. Err: %w", err)
+		return fmt.Errorf("unable to start gRPC proxy. Err: %w", err)
 	}
 
 	mux := runtime.NewServeMux()
@@ -133,28 +134,28 @@ func (s *GRPCServer) StartRPCRESTProxy() error {
 		}
 	}()
 
-	log.Debug(log.GRPCSys, "GRPC proxy server started!")
+	log.Debugln(log.GRPCSys, "GRPC proxy server started!")
 	return nil
 }
 
 func (s *GRPCServer) authenticateClient(ctx context.Context) (context.Context, error) {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
-		return ctx, fmt.Errorf("unable to extract metadata")
+		return ctx, errors.New("unable to extract metadata")
 	}
 
 	authStr, ok := md["authorization"]
 	if !ok {
-		return ctx, fmt.Errorf("authorization header missing")
+		return ctx, errors.New("authorization header missing")
 	}
 
 	if !strings.Contains(authStr[0], "Basic") {
-		return ctx, fmt.Errorf("basic not found in authorization header")
+		return ctx, errors.New("basic not found in authorization header")
 	}
 
 	decoded, err := crypto.Base64Decode(strings.Split(authStr[0], " ")[1])
 	if err != nil {
-		return ctx, fmt.Errorf("unable to base64 decode authorization header")
+		return ctx, errors.New("unable to base64 decode authorization header")
 	}
 
 	creds := strings.Split(string(decoded), ":")
@@ -163,7 +164,7 @@ func (s *GRPCServer) authenticateClient(ctx context.Context) (context.Context, e
 
 	if username != s.config.GRPC.Username ||
 		password != s.config.GRPC.Password {
-		return ctx, fmt.Errorf("username/password mismatch")
+		return ctx, errors.New("username/password mismatch")
 	}
 	return ctx, nil
 }
@@ -210,36 +211,32 @@ func (s *GRPCServer) ExecuteStrategyFromFile(_ context.Context, request *btrpc.E
 		return nil, err
 	}
 
-	io64 := int64(request.IntervalOverride)
-	if io64 > 0 {
+	if io64 := int64(request.IntervalOverride); io64 > 0 {
 		if io64 < gctkline.FifteenSecond.Duration().Nanoseconds() {
 			return nil, fmt.Errorf("%w, interval must be >= 15 seconds, received '%v'", gctkline.ErrInvalidInterval, time.Duration(request.IntervalOverride))
 		}
 		cfg.DataSettings.Interval = gctkline.Interval(request.IntervalOverride)
 	}
-	sto := request.StartTimeOverride.AsTime()
-	if sto.Unix() != 0 && !sto.IsZero() {
+
+	if startTime := request.StartTimeOverride.AsTime(); startTime.Unix() != 0 && !startTime.IsZero() {
 		if cfg.DataSettings.DatabaseData != nil {
-			cfg.DataSettings.DatabaseData.StartDate = request.StartTimeOverride.AsTime()
+			cfg.DataSettings.DatabaseData.StartDate = startTime
 		} else if cfg.DataSettings.APIData != nil {
-			cfg.DataSettings.APIData.StartDate = request.StartTimeOverride.AsTime()
+			cfg.DataSettings.APIData.StartDate = startTime
 		}
 	}
-	eto := request.EndTimeOverride.AsTime()
-	if eto.Unix() != 0 && !eto.IsZero() {
+	if endTime := request.EndTimeOverride.AsTime(); endTime.Unix() != 0 && !endTime.IsZero() {
 		if cfg.DataSettings.DatabaseData != nil {
-			cfg.DataSettings.DatabaseData.EndDate = request.EndTimeOverride.AsTime()
+			cfg.DataSettings.DatabaseData.EndDate = endTime
 		} else if cfg.DataSettings.APIData != nil {
-			cfg.DataSettings.APIData.EndDate = request.EndTimeOverride.AsTime()
+			cfg.DataSettings.APIData.EndDate = endTime
 		}
 	}
-	err = cfg.Validate()
-	if err != nil {
+	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 	if cfg == nil {
-		err = fmt.Errorf("%w backtester config", gctcommon.ErrNilPointer)
-		return nil, err
+		return nil, fmt.Errorf("%w backtester config", gctcommon.ErrNilPointer)
 	}
 
 	if !s.config.Report.GenerateReport {

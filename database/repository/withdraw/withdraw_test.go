@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/thrasher-corp/gocryptotrader/common"
 	"github.com/thrasher-corp/gocryptotrader/currency"
 	"github.com/thrasher-corp/gocryptotrader/database"
 	"github.com/thrasher-corp/gocryptotrader/database/drivers"
@@ -80,8 +81,7 @@ func TestWithdraw(t *testing.T) {
 		},
 	}
 
-	for _, tests := range testCases {
-		test := tests
+	for _, test := range testCases {
 		t.Run(test.name, func(t *testing.T) {
 			if !testhelpers.CheckValidConfig(&test.config.ConnectionDetails) {
 				t.Skip("database not configured skipping test")
@@ -112,7 +112,7 @@ func TestWithdraw(t *testing.T) {
 }
 
 func seedWithdrawData() {
-	for x := 0; x < 20; x++ {
+	for x := range 20 {
 		test := fmt.Sprintf("test-%v", x)
 		resp := &withdraw.Response{
 			Exchange: withdraw.ExchangeResponse{
@@ -153,13 +153,14 @@ func seedWithdrawData() {
 		Event(resp)
 	}
 }
+
 func withdrawHelper(t *testing.T) {
 	t.Helper()
 	seedWithdrawData()
 
 	_, err := GetEventByUUID(withdraw.DryRunID.String())
 	if err != nil {
-		if !errors.Is(err, ErrNoResults) {
+		if !errors.Is(err, common.ErrNoResults) {
 			t.Fatal(err)
 		}
 	}
@@ -181,7 +182,7 @@ func withdrawHelper(t *testing.T) {
 	if len(v) > 0 {
 		_, err = GetEventByUUID(v[0].ID.String())
 		if err != nil {
-			if !errors.Is(err, ErrNoResults) {
+			if !errors.Is(err, common.ErrNoResults) {
 				t.Error(err)
 			}
 		}

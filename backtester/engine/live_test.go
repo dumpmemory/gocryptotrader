@@ -33,7 +33,7 @@ func TestSetupLiveDataHandler(t *testing.T) {
 		t.Errorf("received '%v' expected '%v'", err, gctcommon.ErrNilPointer)
 	}
 
-	bt.exchangeManager = engine.SetupExchangeManager()
+	bt.exchangeManager = engine.NewExchangeManager()
 	err = bt.SetupLiveDataHandler(-1, -1, false, false)
 	if !errors.Is(err, gctcommon.ErrNilPointer) {
 		t.Errorf("received '%v' expected '%v'", err, gctcommon.ErrNilPointer)
@@ -283,8 +283,8 @@ func TestAppendDataSource(t *testing.T) {
 
 	setup.pair = currency.NewPair(currency.BTC, currency.USDT)
 	err = dataHandler.AppendDataSource(setup)
-	if !errors.Is(err, kline.ErrUnsetInterval) {
-		t.Errorf("received '%v' expected '%v'", err, kline.ErrUnsetInterval)
+	if !errors.Is(err, kline.ErrInvalidInterval) {
+		t.Errorf("received '%v' expected '%v'", err, kline.ErrInvalidInterval)
 	}
 
 	setup.interval = kline.OneDay
